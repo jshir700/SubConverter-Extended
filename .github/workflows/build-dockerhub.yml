@@ -90,8 +90,8 @@ jobs:
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
         with:
           images: |
-            aethersailor/subconverter-extended
-            ghcr.io/aethersailor/subconverter-extended
+            jshir700/subconverter-extended
+            ghcr.io/jshir700/subconverter-extended
           tags: |
             type=raw,value=latest,enable=${{ steps.version.outputs.is_release == 'true' }}
             type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.is_release == 'true' }}
@@ -435,8 +435,8 @@ jobs:
         run: |
           TAGS="${{ needs.prepare.outputs.tags }}"
           IMAGE_NAMES=(
-            "aethersailor/subconverter-extended"
-            "ghcr.io/aethersailor/subconverter-extended"
+            "jshir700/subconverter-extended"
+            "ghcr.io/jshir700/subconverter-extended"
           )
           for IMAGE_NAME in "${IMAGE_NAMES[@]}"; do
             for TAG in $TAGS; do

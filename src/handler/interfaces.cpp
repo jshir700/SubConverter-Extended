@@ -645,6 +645,9 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
               argUpdateStrict = getUrlArg(argument, "strict");
   std::string argRenames = getUrlArg(argument, "rename"),
               argFilterScript = getUrlArg(argument, "filter_script");
+  std::string argUserAgent = getUrlArg(argument, "ua"),
+              argFetchTimeout = getUrlArg(argument, "fetch_timeout"),
+              argProviderProxy = getUrlArg(argument, "provider_proxy");
 
   /// switches with default value
   tribool argUpload = getUrlArg(argument, "upload"),
@@ -981,6 +984,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   string_array urls;
   std::vector<Proxy> nodes, insert_nodes;
   int groupID = 0;
+  long lFetchTimeout =
+      !argFetchTimeout.empty() ? to_int(argFetchTimeout, 0) : 0;
 
   parse_settings parse_set;
   parse_set.proxy = &proxy;
@@ -991,6 +996,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   parse_set.sub_info = &subInfo;
   parse_set.authorized = authorized;
   parse_set.request_header = &request.headers;
+  parse_set.custom_user_agent = &argUserAgent;
+  parse_set.fetch_timeout = &lFetchTimeout;
   parse_set.js_runtime = ext.js_runtime;
   parse_set.js_context = ext.js_context;
 
@@ -1133,6 +1140,11 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
         }
         if (!argExcludeRemark.empty() && regValid(argExcludeRemark)) {
           provider.exclude_filter = argExcludeRemark;
+        }
+
+        // 设置 provider_proxy，用于指定拉取 provider 时使用的代理
+        if (!argProviderProxy.empty()) {
+          provider.proxy = argProviderProxy;
         }
 
         ext.providers.push_back(provider);

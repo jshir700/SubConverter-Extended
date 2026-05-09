@@ -68,6 +68,7 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
   std::vector<Proxy> nodes;
   Proxy node;
   std::string strSub, extra_headers, custom_group;
+  long fetch_timeout = parse_set.fetch_timeout ? *parse_set.fetch_timeout : 0;
 
   // TODO: replace with startsWith if appropriate
   link = replaceAllDistinct(link, "\"", "");
@@ -279,16 +280,26 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
 
       // Replace browser UA with clash.meta
       if (request_headers) {
-        auto ua_it = request_headers->find("User-Agent");
-        if (ua_it != request_headers->end() && isBrowserUA(ua_it->second)) {
+        custom_headers = *request_headers;
+        auto ua_it = custom_headers.find("User-Agent");
+        if (ua_it != custom_headers.end() && isBrowserUA(ua_it->second)) {
           writeLog(LOG_TYPE_INFO, "Browser UA detected, replacing with "
                                   "clash.meta UA to avoid blocking");
           ua_it->second = "clash.meta";
         }
       }
 
+      // Handle custom User-Agent override from &ua= parameter
+      if (parse_set.custom_user_agent &&
+          !parse_set.custom_user_agent->empty()) {
+        if (custom_headers.empty() && request_headers)
+          custom_headers = *request_headers;
+        custom_headers["User-Agent"] = *parse_set.custom_user_agent;
+      }
+
       strSub = webGet(link, proxy, global.cacheSubscription, &extra_headers,
-                      request_headers);
+                      request_headers ? (custom_headers.empty() ? request_headers : &custom_headers) : nullptr,
+                      fetch_timeout);
     }
     /*
     if(strSub.size() == 0)
