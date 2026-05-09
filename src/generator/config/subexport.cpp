@@ -961,7 +961,9 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
       single_provider["proxy"] = p.proxy.empty() ? "DIRECT" : p.proxy;
       single_provider["path"] = p.path;
       if (!p.user_agent.empty()) {
-        single_provider["header"]["User-Agent"].push_back(p.user_agent);
+        YAML::Node ua_node(p.user_agent);
+        ua_node.SetStyle(YAML::EmitterStyle::DoubleQuoted);
+        single_provider["header"]["User-Agent"].push_back(ua_node);
       }
 
       // 添加过滤器
