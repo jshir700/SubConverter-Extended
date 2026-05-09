@@ -23,7 +23,6 @@ on:
 
 permissions:
   contents: write  # Changed from 'read' to enable auto-commit and release creation
-  packages: write  # Required for GHCR push
 
 concurrency:
   group: dockerhub-${{ github.ref_name }}
@@ -104,7 +103,6 @@ jobs:
         with:
           images: |
             jshir700/subconverter-extended
-            ghcr.io/jshir700/subconverter-extended
           tags: |
             type=raw,value=latest,enable=${{ steps.version.outputs.is_release == 'true' }}
             type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.is_release == 'true' }}
@@ -132,14 +130,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       # Build ONCE to builder stage and load to Docker (using Alpine for smaller image)
       - name: Build to builder stage (single build)
@@ -315,14 +305,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       # Build to builder stage FIRST to extract binary (using Alpine for smaller image)
       - name: Build to builder stage (extract binary)
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
@@ -437,19 +419,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Create and push manifest list
         run: |
           TAGS="${{ needs.prepare.outputs.tags }}"
           IMAGE_NAMES=(
             "jshir700/subconverter-extended"
-            "ghcr.io/jshir700/subconverter-extended"
           )
           for IMAGE_NAME in "${IMAGE_NAMES[@]}"; do
             for TAG in $TAGS; do
