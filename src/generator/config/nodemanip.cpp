@@ -280,10 +280,9 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
         link = urlDecode(getUrlArg(link, "url"));
 
       // Determine which request headers to pass to the subscription download
-      // Default: don't forward client headers (use subconverter's built-in UA)
       string_icase_map *headers_to_send = nullptr;
 
-      // Handle custom User-Agent override from &ua= parameter
+      // 1. &ua= parameter: use custom UA, forward client headers as well
       if (parse_set.custom_user_agent &&
           !parse_set.custom_user_agent->empty()) {
         if (request_headers)
@@ -291,7 +290,7 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
         custom_headers["User-Agent"] = *parse_set.custom_user_agent;
         headers_to_send = &custom_headers;
       }
-      // Check if client is using a browser UA that should be replaced
+      // 2. No &ua=: check for browser UA and replace if needed
       else if (request_headers) {
         auto ua_it = request_headers->find("User-Agent");
         if (ua_it != request_headers->end() && isBrowserUA(ua_it->second)) {
@@ -300,8 +299,12 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
           writeLog(LOG_TYPE_INFO, "Browser UA detected, replacing with "
                                   "clash.meta UA to avoid blocking");
           headers_to_send = &custom_headers;
+        } else {
+          // 3. Client headers exist, not a browser UA: forward as-is
+          headers_to_send = request_headers;
         }
       }
+      // 4. No client headers: use subconverter's built-in UA (headers_to_send stays nullptr)
 
       strSub = webGet(link, proxy, global.cacheSubscription, &extra_headers,
                       headers_to_send, fetch_timeout);
