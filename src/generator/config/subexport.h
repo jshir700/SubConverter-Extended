@@ -24,6 +24,7 @@ struct ProxyProvider {
   std::string exclude_filter; // 排除正则
   std::string path;           // 本地缓存路径
   std::string proxy;          // 用于拉取 provider 的代理（如 "Proxy"）
+  std::string user_agent;     // 自定义 User-Agent（Mihomo 1.14.0+ 支持）
   int groupId;                // 所属组 ID
 
   ProxyProvider() : interval(3600), groupId(0) {}

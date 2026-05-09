@@ -960,6 +960,9 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
       single_provider["interval"] = p.interval;
       single_provider["proxy"] = p.proxy.empty() ? "DIRECT" : p.proxy;
       single_provider["path"] = p.path;
+      if (!p.user_agent.empty()) {
+        single_provider["user-agent"] = p.user_agent;
+      }
 
       // 添加过滤器
       if (!p.filter.empty()) {
