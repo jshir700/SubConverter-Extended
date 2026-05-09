@@ -67,8 +67,8 @@ jobs:
               VERSION="$LATEST_TAG"
               echo "Detected latest tag: $VERSION"
             else
-              VERSION="master-$(git rev-parse --short HEAD)"
-              echo "No tags found, using commit hash: $VERSION"
+              VERSION="latest"
+              echo "No tags found, using 'latest' as version"
             fi
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "is_release=true" >> $GITHUB_OUTPUT
@@ -80,8 +80,8 @@ jobs:
               VERSION="$LATEST_TAG"
               echo "Detected latest tag: $VERSION"
             else
-              VERSION="master-$(git rev-parse --short HEAD)"
-              echo "No tags found, using commit hash: $VERSION"
+              VERSION="latest"
+              echo "No tags found, using 'latest' as version"
             fi
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "is_release=true" >> $GITHUB_OUTPUT
