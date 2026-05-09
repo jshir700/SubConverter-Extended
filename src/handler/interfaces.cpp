@@ -743,6 +743,9 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   template_args tpl_args;
   tpl_args.global_vars = global.templateVars;
   tpl_args.request_params = req_arg_map;
+  // Inject resolved User-Agent into template context as {{ global.ua }}
+  if (!argUserAgent.empty())
+    tpl_args.global_vars["ua"] = argUserAgent;
 
   /// check for proxy settings
   std::string proxy = parseProxy(global.proxySubscription);
@@ -1080,83 +1083,111 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     }
 
     // 只有当有订阅链接时才启用 proxy-provider 模式
+    // 当指定了 &ua= 参数时，改用非 proxy-provider 模式（服务器端使用指定 UA 拉取订阅）
     if (!subscription_urls.empty()) {
-      writeLog(0, "Found subscription URLs, enabling proxy-provider mode.",
-               LOG_LEVEL_INFO);
-      ext.use_proxy_provider = true;
-      std::unordered_set<std::string> provider_names;
-      auto reserve_provider_name = [&](const std::string &base) {
-        std::string base_name =
-            clampProviderNameLength(base, kProviderNameMaxLen);
-        base_name = trimOf(base_name, '.', true, true);
-        if (base_name.empty())
-          base_name = "Provider";
-        if (provider_names.insert(base_name).second)
-          return base_name;
-        int index = 1;
-        while (true) {
-          std::string suffix = "_" + std::to_string(index);
-          size_t max_base = kProviderNameMaxLen > suffix.size()
-                                ? kProviderNameMaxLen - suffix.size()
-                                : 0;
-          std::string prefix = clampProviderNameLength(base_name, max_base);
-          prefix = trimOf(prefix, '.', true, true);
-          if (prefix.empty())
-            prefix = clampProviderNameLength("Provider", max_base);
-          std::string candidate = prefix + suffix;
-          if (provider_names.insert(candidate).second)
-            return candidate;
-          index++;
-        }
-      };
-
-      // 为订阅链接创建 proxy-provider
-      for (const SubscriptionLinkItem &item : subscription_urls) {
-        ProxyProvider provider;
-        // 使用 URL 的 MD5 哈希前 10 位作为唯一特征码
-        // 这样相同的订阅链接会生成相同的 provider 名称
-        // 不同的订阅链接会生成不同的名称，触发客户端自动更新
-        std::string urlHash =
-            item.url_decoded ? generateProviderHashFromDecodedUrl(item.url)
-                             : generateProviderHash(item.url);
-        std::string default_name = "Provider_" + urlHash;
-        std::string sanitized_provider = sanitizeProviderName(item.provider);
-        std::string base_name =
-            sanitized_provider.empty() ? default_name : sanitized_provider;
-        base_name = sanitizeProviderName(base_name);
-        if (base_name.empty())
-          base_name = default_name;
-        provider.name = reserve_provider_name(base_name);
-        provider.tag = item.tag;
+      if (!argUserAgent.empty()) {
+        // &ua= 已指定：不使用 proxy-provider 模式
+        // 而是将订阅链接作为普通 URL，由服务器端使用指定 UA 通过 addNodes() 拉取解析
+        // 这样 ClashMetaForAndroid 等不尊重 YAML header.User-Agent 的客户端也能正确使用 &ua=
         writeLog(0,
-                 "Generated provider: " + provider.name + " for URL: " +
-                     item.url,
+                 "&ua= specified (" + argUserAgent +
+                     "): disabling proxy-provider mode, fetching subscription "
+                     "server-side with custom UA.",
                  LOG_LEVEL_INFO);
-        provider.url = item.url_decoded ? item.url
-                                        : urlDecode(item.url); // 解码 URL
-        // Set custom User-Agent on the provider itself (Mihomo 1.14.0+ supports
-        // the "user-agent" field in proxy-provider config, so the client will
-        // use this UA when fetching the subscription directly)
-        provider.user_agent = argUserAgent;
-        provider.interval = 3600;    // 固定使用 3600 秒（1小时）
-        provider.groupId = groupID;
-        provider.path = "./providers/" + provider.name + ".yaml";
-
-        // 将 include/exclude 参数转换为 filter
-        if (!argIncludeRemark.empty() && regValid(argIncludeRemark)) {
-          provider.filter = argIncludeRemark;
+        ext.use_proxy_provider = false;
+        // 将订阅链接添加到节点链接列表，由后续 addNodes() 使用指定 UA 拉取
+        for (const SubscriptionLinkItem &item : subscription_urls) {
+          std::string node_link = item.url_decoded ? item.url
+                                                   : urlDecode(item.url);
+          if (!item.tag.empty())
+            node_link = "tag:" + item.tag + "," + node_link;
+          writeLog(0,
+                   "Adding subscription URL to node list for server-side "
+                   "fetch: '" +
+                       node_link + "'",
+                   LOG_LEVEL_INFO);
+          node_urls.push_back(node_link);
         }
-        if (!argExcludeRemark.empty() && regValid(argExcludeRemark)) {
-          provider.exclude_filter = argExcludeRemark;
-        }
+      } else {
+        // 未指定 &ua=：使用 proxy-provider 模式（客户端直接拉取）
+        writeLog(0, "Found subscription URLs, enabling proxy-provider mode.",
+                 LOG_LEVEL_INFO);
+        ext.use_proxy_provider = true;
 
-        // 设置 provider_proxy，用于指定拉取 provider 时使用的代理
-        if (!argProviderProxy.empty()) {
-          provider.proxy = argProviderProxy;
-        }
+        std::unordered_set<std::string> provider_names;
+        auto reserve_provider_name = [&](const std::string &base) {
+          std::string base_name =
+              clampProviderNameLength(base, kProviderNameMaxLen);
+          base_name = trimOf(base_name, '.', true, true);
+          if (base_name.empty())
+            base_name = "Provider";
+          if (provider_names.insert(base_name).second)
+            return base_name;
+          int index = 1;
+          while (true) {
+            std::string suffix = "_" + std::to_string(index);
+            size_t max_base = kProviderNameMaxLen > suffix.size()
+                                  ? kProviderNameMaxLen - suffix.size()
+                                  : 0;
+            std::string prefix = clampProviderNameLength(base_name, max_base);
+            prefix = trimOf(prefix, '.', true, true);
+            if (prefix.empty())
+              prefix = clampProviderNameLength("Provider", max_base);
+            std::string candidate = prefix + suffix;
+            if (provider_names.insert(candidate).second)
+              return candidate;
+            index++;
+          }
+        };
 
-        ext.providers.push_back(provider);
-        groupID++;
+        // 为订阅链接创建 proxy-provider
+        for (const SubscriptionLinkItem &item : subscription_urls) {
+          ProxyProvider provider;
+          // 使用 URL 的 MD5 哈希前 10 位作为唯一特征码
+          // 这样相同的订阅链接会生成相同的 provider 名称
+          // 不同的订阅链接会生成不同的名称，触发客户端自动更新
+          std::string urlHash =
+              item.url_decoded ? generateProviderHashFromDecodedUrl(item.url)
+                               : generateProviderHash(item.url);
+          std::string default_name = "Provider_" + urlHash;
+          std::string sanitized_provider = sanitizeProviderName(item.provider);
+          std::string base_name =
+              sanitized_provider.empty() ? default_name : sanitized_provider;
+          base_name = sanitizeProviderName(base_name);
+          if (base_name.empty())
+            base_name = default_name;
+          provider.name = reserve_provider_name(base_name);
+          provider.tag = item.tag;
+          writeLog(0,
+                   "Generated provider: " + provider.name + " for URL: " +
+                       item.url,
+                   LOG_LEVEL_INFO);
+          provider.url = item.url_decoded ? item.url
+                                          : urlDecode(item.url); // 解码 URL
+          // Set custom User-Agent on the provider itself (Mihomo 1.14.0+ supports
+          // the "user-agent" field in proxy-provider config, so the client will
+          // use this UA when fetching the subscription directly)
+          provider.user_agent = argUserAgent;
+          provider.interval = 3600;    // 固定使用 3600 秒（1小时）
+          provider.groupId = groupID;
+          provider.path = "./providers/" + provider.name + ".yaml";
+
+          // 将 include/exclude 参数转换为 filter
+          if (!argIncludeRemark.empty() && regValid(argIncludeRemark)) {
+            provider.filter = argIncludeRemark;
+          }
+          if (!argExcludeRemark.empty() && regValid(argExcludeRemark)) {
+            provider.exclude_filter = argExcludeRemark;
+          }
+
+          // 设置 provider_proxy，用于指定拉取 provider 时使用的代理
+          if (!argProviderProxy.empty()) {
+            provider.proxy = argProviderProxy;
+          }
+
+          ext.providers.push_back(provider);
+          groupID++;
+        }
       }
     } else {
       // 没有订阅链接，禁用 proxy-provider 模式
@@ -2077,6 +2108,14 @@ std::string renderTemplate(RESPONSE_CALLBACK_ARGS) {
     req_arg_map[x.first] = x.second;
   }
   tpl_args.request_params = req_arg_map;
+  // Inject &ua= parameter into template context as {{ global.ua }}
+  {
+    std::string tpl_ua = getUrlArg(argument, "ua");
+    if (tpl_ua.empty() && !global.user_agent.empty())
+      tpl_ua = global.user_agent;
+    if (!tpl_ua.empty())
+      tpl_args.global_vars["ua"] = tpl_ua;
+  }
 
   std::string output_content;
   if (render_template(template_content, tpl_args, output_content,
