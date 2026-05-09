@@ -571,6 +571,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
     {
         md("cache");
         const std::string url_md5 = build_cache_key(url, proxy, request_headers);
+        writeLog(0, "[SCE-DEBUG] webget: cache_key=" + url_md5 + " for url='" + url + "', proxy='" + proxy + "', request_headers=" + (request_headers ? std::to_string(request_headers->size()) + " entries" : "nullptr"), LOG_LEVEL_INFO);
         const std::string path = "cache/" + url_md5, path_header = path + "_header";
         struct stat result {};
         if(stat(path.data(), &result) == 0) // cache exist

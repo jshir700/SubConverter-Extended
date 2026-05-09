@@ -297,6 +297,7 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
                                   "clash.meta UA to avoid blocking");
         }
       }
+      writeLog(0, "[SCE-DEBUG] nodemanip: fetching URL='" + link + "', final UA='" + (custom_headers.contains("User-Agent") ? custom_headers.at("User-Agent") : "(using curl default)") + "', custom_user_agent ptr=" + (parse_set.custom_user_agent ? "'" + *parse_set.custom_user_agent + "'" : "nullptr") + "', request_headers has UA=" + (request_headers && request_headers->contains("User-Agent") ? "'" + request_headers->at("User-Agent") + "'" : "none"), LOG_LEVEL_INFO);
       // Note: custom_headers is always passed (never nullptr) so webget.cpp
       // can detect missing User-Agent and fall back to built-in UA
 
