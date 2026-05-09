@@ -1136,7 +1136,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
         // Inject &ua= parameter into provider URL so the client (Mihomo/Clash)
         // uses the configured User-Agent when fetching this subscription
         if (!argUserAgent.empty()) {
-            provider.url += (provider.url.find('?') == std::string::npos ? "?" : "&")
+            provider.url += std::string(provider.url.find('?') == std::string::npos ? "?" : "&")
                          + "ua=" + urlEncode(argUserAgent);
         }
         provider.interval = 3600;    // 固定使用 3600 秒（1小时）
