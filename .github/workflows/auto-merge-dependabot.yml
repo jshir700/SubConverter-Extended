@@ -13,7 +13,7 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.base.ref == 'dev'
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.base.ref == 'master'
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
@@ -36,8 +36,8 @@ jobs:
             console.log(`package-ecosystem=${packageEcosystem}`);
             console.log(`labels=${labels.join(',')}`);
 
-            if (targetBranch !== 'dev') {
-              console.log('Skip: Dependabot metadata target branch is not dev.');
+            if (targetBranch !== 'master') {
+              console.log('Skip: Dependabot metadata target branch is not master.');
               return 'false';
             }
 

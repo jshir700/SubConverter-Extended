@@ -12,10 +12,10 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout dev
+      - name: Checkout master
         uses: actions/checkout@v6
         with:
-          ref: dev
+          ref: master
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -77,4 +77,4 @@ jobs:
           fi
 
           git commit -m "$msg" || exit 0
-          git push origin HEAD:dev
+          git push origin HEAD:master
