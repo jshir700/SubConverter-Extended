@@ -66,14 +66,23 @@ void safe_set_times(RegexMatchConfigs data)
     global.timeNodeRules.swap(data);
 }
 
-std::shared_future<std::string> fetchFileAsync(const std::string &path, const std::string &proxy, int cache_ttl, bool find_local, bool async)
+std::shared_future<std::string> fetchFileAsync(const std::string &path, const std::string &proxy, int cache_ttl, bool find_local, bool async, const std::string &user_agent)
 {
+    // Helper lambda to call webGet with optional UA header
+    auto do_webGet = [&](const std::string &url, const std::string &px, int ttl) -> std::string {
+        if(user_agent.empty())
+            return webGet(url, px, ttl);
+        string_icase_map headers;
+        headers["User-Agent"] = user_agent;
+        return webGet(url, px, ttl, nullptr, &headers);
+    };
+
     if(!async)
     {
         if(find_local && fileExist(path, true))
             return make_ready_future(fileGet(path, true));
         if(isLink(path))
-            return make_ready_future(webGet(path, proxy, cache_ttl));
+            return make_ready_future(do_webGet(path, proxy, cache_ttl));
         return make_ready_future(std::string());
     }
 
@@ -83,7 +92,13 @@ std::shared_future<std::string> fetchFileAsync(const std::string &path, const st
     else */if(find_local && fileExist(path, true))
         retVal = std::async(std::launch::async, [path](){return fileGet(path, true);});
     else if(isLink(path))
-        retVal = std::async(std::launch::async, [path, proxy, cache_ttl](){return webGet(path, proxy, cache_ttl);});
+        retVal = std::async(std::launch::async, [path, proxy, cache_ttl, user_agent](){
+            if(user_agent.empty())
+                return webGet(path, proxy, cache_ttl);
+            string_icase_map headers;
+            headers["User-Agent"] = user_agent;
+            return webGet(path, proxy, cache_ttl, nullptr, &headers);
+        });
     else
         return std::async(std::launch::async, [](){return std::string();});
     return retVal;

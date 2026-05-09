@@ -206,7 +206,7 @@ void readGroup(YAML::Node node, string_array &dest, bool scope_limit = true) {
 
 void readRuleset(YAML::Node node, string_array &dest, bool scope_limit = true) {
   for (auto &&object : node) {
-    std::string strLine, name, url, group, interval;
+    std::string strLine, name, url, group, interval, ua;
     object["import"] >>= name;
     if (!name.empty()) {
       dest.emplace_back("!!import:" + name);
@@ -216,10 +216,13 @@ void readRuleset(YAML::Node node, string_array &dest, bool scope_limit = true) {
     object["group"] >>= group;
     object["rule"] >>= name;
     object["interval"] >>= interval;
+    object["ua"] >>= ua;
     if (!url.empty()) {
       strLine = group + "," + url;
       if (!interval.empty())
         strLine += "," + interval;
+      if (!ua.empty())
+        strLine += ",ua=" + ua;
     } else if (!name.empty())
       strLine = group + ",[]" + name;
     else
@@ -252,7 +255,8 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
             RULESET_SURGE,
             std::async(std::launch::async,
                        [=]() { return rule_url.substr(pos); }),
-            0};
+            0,
+            ""};
     } else {
       ruleset_type type = RULESET_SURGE;
       rule_url_typed = rule_url;
@@ -272,8 +276,9 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
             rule_url_typed,
             type,
             fetchFileAsync(rule_url, proxy, global.cacheRuleset, true,
-                           global.asyncFetchRuleset),
-            x.Interval};
+                           global.asyncFetchRuleset, x.UserAgent),
+            x.Interval,
+            x.UserAgent};
     }
     ruleset_content_array.emplace_back(std::move(rc));
   }
