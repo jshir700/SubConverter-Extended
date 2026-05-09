@@ -279,28 +279,32 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
       if (startsWith(link, "surge:///install-config")) // surge config link
         link = urlDecode(getUrlArg(link, "url"));
 
-      // Replace browser UA with clash.meta
-      if (request_headers) {
-        custom_headers = *request_headers;
-        auto ua_it = custom_headers.find("User-Agent");
-        if (ua_it != custom_headers.end() && isBrowserUA(ua_it->second)) {
-          writeLog(LOG_TYPE_INFO, "Browser UA detected, replacing with "
-                                  "clash.meta UA to avoid blocking");
-          ua_it->second = "clash.meta";
-        }
-      }
+      // Determine which request headers to pass to the subscription download
+      // Default: don't forward client headers (use subconverter's built-in UA)
+      string_icase_map *headers_to_send = nullptr;
 
       // Handle custom User-Agent override from &ua= parameter
       if (parse_set.custom_user_agent &&
           !parse_set.custom_user_agent->empty()) {
-        if (custom_headers.empty() && request_headers)
+        if (request_headers)
           custom_headers = *request_headers;
         custom_headers["User-Agent"] = *parse_set.custom_user_agent;
+        headers_to_send = &custom_headers;
+      }
+      // Check if client is using a browser UA that should be replaced
+      else if (request_headers) {
+        auto ua_it = request_headers->find("User-Agent");
+        if (ua_it != request_headers->end() && isBrowserUA(ua_it->second)) {
+          custom_headers = *request_headers;
+          custom_headers["User-Agent"] = "clash.meta";
+          writeLog(LOG_TYPE_INFO, "Browser UA detected, replacing with "
+                                  "clash.meta UA to avoid blocking");
+          headers_to_send = &custom_headers;
+        }
       }
 
       strSub = webGet(link, proxy, global.cacheSubscription, &extra_headers,
-                      request_headers ? (custom_headers.empty() ? request_headers : &custom_headers) : nullptr,
-                      fetch_timeout);
+                      headers_to_send, fetch_timeout);
     }
     /*
     if(strSub.size() == 0)
