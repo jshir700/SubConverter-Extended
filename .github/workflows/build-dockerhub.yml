@@ -3,9 +3,10 @@ name: Build and Push Docker image
 on:
   push:
     branches:
-      - dev  # Only dev branch triggers on push
+      - master
+      - dev
     tags:
-      - 'v*.*.*'  # Tag push triggers master build
+      - 'v*.*.*'  # Tag push triggers release build
     paths-ignore:
       - 'README.md'
       - 'README-*.md'
@@ -60,6 +61,19 @@ jobs:
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "is_release=true" >> $GITHUB_OUTPUT
             echo "Detected version from tag: $VERSION"
+          elif [[ "${{ github.ref }}" == refs/heads/master ]] && [[ "${{ github.event_name }}" == "push" ]]; then
+            # Master push: use latest tag + is_release=true for "latest" tag
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -n "$LATEST_TAG" ]; then
+              VERSION="$LATEST_TAG"
+              echo "Detected latest tag: $VERSION"
+            else
+              VERSION="master-$(git rev-parse --short HEAD)"
+              echo "No tags found, using commit hash: $VERSION"
+            fi
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
+            echo "Master branch push: $VERSION (latest)"
           elif [[ "${{ github.ref }}" == refs/heads/master ]] && ([[ "${{ github.event_name }}" == "workflow_dispatch" ]] || [[ "${{ github.event_name }}" == "schedule" ]]); then
             # Master manual/schedule trigger: use latest tag as version
             LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -67,7 +81,6 @@ jobs:
               VERSION="$LATEST_TAG"
               echo "Detected latest tag: $VERSION"
             else
-              # Fallback if no tags exist
               VERSION="master-$(git rev-parse --short HEAD)"
               echo "No tags found, using commit hash: $VERSION"
             fi
