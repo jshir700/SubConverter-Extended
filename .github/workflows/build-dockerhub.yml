@@ -118,7 +118,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          token: ${{ github.event_name == 'pull_request' && github.token || secrets.PAT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx
@@ -292,7 +292,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          token: ${{ github.event_name == 'pull_request' && github.token || secrets.PAT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx

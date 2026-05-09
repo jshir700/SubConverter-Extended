@@ -3,6 +3,9 @@ name: Sync Dev to Master
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   sync-branches:
     runs-on: ubuntu-latest
@@ -11,7 +14,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: master
-          token: ${{ secrets.PAT_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Setup Git User
