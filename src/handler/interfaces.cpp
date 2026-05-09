@@ -648,6 +648,9 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   std::string argUserAgent = getUrlArg(argument, "ua"),
               argFetchTimeout = getUrlArg(argument, "fetch_timeout"),
               argProviderProxy = getUrlArg(argument, "provider_proxy");
+  // If no &ua= URL parameter, fall back to global-ua from config file
+  if (argUserAgent.empty() && !global.user_agent.empty())
+    argUserAgent = global.user_agent;
 
   /// switches with default value
   tribool argUpload = getUrlArg(argument, "upload"),
