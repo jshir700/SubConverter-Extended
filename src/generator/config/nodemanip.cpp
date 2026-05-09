@@ -261,12 +261,23 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
       }
     }
 
-    // 处理订阅链接：跳过下载，交给 proxy-provider
+    // 处理订阅链接
+    // 当 &ua= 指定时，不使用 proxy-provider 模式，改为服务器端下载
     if (isSubscription) {
-      writeLog(LOG_TYPE_INFO, "Subscription URL detected, skipping download "
-                              "(will be used as proxy-provider): " +
-                                  link);
-      return 0; // 返回成功，让后续逻辑将其写入 proxy-provider
+      if (parse_set.custom_user_agent &&
+          !parse_set.custom_user_agent->empty()) {
+        writeLog(LOG_TYPE_INFO,
+                 "Subscription URL detected but &ua= specified, downloading "
+                 "server-side with custom UA: " +
+                     link);
+        // 不 return，继续执行下载逻辑
+      } else {
+        writeLog(LOG_TYPE_INFO,
+                 "Subscription URL detected, skipping download "
+                 "(will be used as proxy-provider): " +
+                     link);
+        return 0; // 返回成功，让后续逻辑将其写入 proxy-provider
+      }
     }
 
     // 节点链接：直接用 mihomo 解析（不需要 webGet）
