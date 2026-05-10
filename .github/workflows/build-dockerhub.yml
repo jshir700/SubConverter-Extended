@@ -8,6 +8,7 @@ on:
     tags:
       - 'v*.*.*'  # Tag push triggers release build
     paths-ignore:
+  workflow_dispatch:
       - 'README.md'
       - 'README-*.md'
       - 'docker-compose.yml'
