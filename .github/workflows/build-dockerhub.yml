@@ -1,24 +1,8 @@
 name: Build and Push Docker image
 
 on:
-  # push:
-  #   branches:
-  #     - master
-  #     - dev
-  #   tags:
-  #     - 'v*.*.*'  # Tag push triggers release build
-  #   paths-ignore:
-  #     - 'README.md'
-  #     - 'README-*.md'
-  #     - 'docker-compose.yml'
-  #     - '.github/workflows/**'
-  #     - '!.github/workflows/build-dockerhub.yml'
-  pull_request:
-    branches:
-      - master
-      - dev
   workflow_run:
-    workflows: ["Auto-merge Dependabot PRs"]
+    workflows: ["CodeQL"]
     types:
       - completed
   workflow_dispatch: {}  # Manual trigger
@@ -36,8 +20,8 @@ jobs:
   prepare:
     name: "🔧 Prepare Metadata"
     runs-on: ubuntu-latest
-    # Skip if [skip ci] and ensure schedule only runs on master
-    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master') && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')"
+    # Skip if [skip ci]; schedule only runs on master; workflow_run only runs on success for master/dev
+    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master') && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.head_branch == 'master' || github.event.workflow_run.head_branch == 'dev')))"
     outputs:
       sha_short: ${{ steps.vars.outputs.sha_short }}
       version: ${{ steps.version.outputs.version }}
@@ -50,6 +34,26 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+
+      - name: Checkout exact commit for workflow_run
+        if: github.event_name == 'workflow_run'
+        run: git checkout ${{ github.event.workflow_run.head_sha }}
+
+      - name: Check for Docker-relevant changes (workflow_run only)
+        id: check_docker_changes
+        if: github.event_name == 'workflow_run'
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          echo "Changed files: $CHANGED_FILES"
+          if echo "$CHANGED_FILES" | tr ' ' '\n' | grep -qE '^(src/|CMakeLists\.txt|Dockerfile|bridge/|\.github/workflows/build-dockerhub\.yml)'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if no Docker-relevant changes
+        if: steps.check_docker_changes.outputs.changed == 'false'
+        run: echo "No Docker-relevant changes, skipping build" && exit 1
 
       - name: Get short SHA
         id: vars
@@ -64,8 +68,8 @@ jobs:
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "is_release=true" >> $GITHUB_OUTPUT
             echo "Detected version from tag: $VERSION"
-          elif [[ "${{ github.ref }}" == refs/heads/master ]] && [[ "${{ github.event_name }}" == "push" ]]; then
-            # Master push: use latest tag + is_release=true for "latest" tag
+          elif [[ "${{ github.ref }}" == refs/heads/master ]] && ([[ "${{ github.event_name }}" == "push" ]] || [[ "${{ github.event_name }}" == "workflow_run" ]]); then
+            # Master push or workflow_run: use latest tag + is_release=true for "latest" tag
             LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
             if [ -n "$LATEST_TAG" ]; then
               VERSION="$LATEST_TAG"
@@ -76,7 +80,7 @@ jobs:
             fi
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "is_release=true" >> $GITHUB_OUTPUT
-            echo "Master branch push: $VERSION (latest)"
+            echo "Master branch build (push/workflow_run): $VERSION (latest)"
           elif [[ "${{ github.ref }}" == refs/heads/master ]] && ([[ "${{ github.event_name }}" == "workflow_dispatch" ]] || [[ "${{ github.event_name }}" == "schedule" ]]); then
             # Master manual/schedule trigger: use latest tag as version
             LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -124,6 +128,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+
+      - name: Checkout exact commit for workflow_run
+        if: github.event_name == 'workflow_run'
+        run: git checkout ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
@@ -298,6 +306,10 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+
+      - name: Checkout exact commit for workflow_run
+        if: github.event_name == 'workflow_run'
+        run: git checkout ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
