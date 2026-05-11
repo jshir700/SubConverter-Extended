@@ -282,7 +282,7 @@ namespace INIBinding
             };
             */
             RulesetConfigs confs;
-            for(const String &x : arr)
+            for(String x : arr)
             {
                 RulesetConfig conf;
                 String::size_type pos = x.find(",");
@@ -353,7 +353,7 @@ namespace INIBinding
                         }
                         else
                         {
-                            String::size_type epos2 = base.rfind(",");
+                            // epos2 intentionally unused (base.rfind used below via pos-relative offset)
                             // pos-relative offset
                             String full_base = x.substr(pos + 1, proxypos - pos - 1);
                             String::size_type epos_full = full_base.rfind(",");

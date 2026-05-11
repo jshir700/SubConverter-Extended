@@ -1,22 +1,22 @@
 name: Build and Push Docker image
 
 on:
-  push:
-    branches:
-      - master
-      - dev
-    tags:
-      - 'v*.*.*'  # Tag push triggers release build
-    paths-ignore:
-      - 'README.md'
-      - 'README-*.md'
-      - 'docker-compose.yml'
-      - '.github/workflows/**'
-      - '!.github/workflows/build-dockerhub.yml'
-  pull_request:
-    branches:
-      - master
-      - dev
+  # push:
+  #   branches:
+  #     - master
+  #     - dev
+  #   tags:
+  #     - 'v*.*.*'  # Tag push triggers release build
+  #   paths-ignore:
+  #     - 'README.md'
+  #     - 'README-*.md'
+  #     - 'docker-compose.yml'
+  #     - '.github/workflows/**'
+  #     - '!.github/workflows/build-dockerhub.yml'
+  # pull_request:
+  #   branches:
+  #     - master
+  #     - dev
   workflow_dispatch: {}  # Manual trigger
   schedule:
     - cron: '0 19 * * 0'  # Run at 03:00 (UTC+8) on Mondays
