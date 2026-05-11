@@ -1124,6 +1124,14 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
     }
     if (!filtered_nodelist.empty())
       singlegroup["proxies"] = filtered_nodelist;
+
+    // Safety check: ensure the proxy group always has at least 'use' or 'proxies'
+    // If neither is present, add DIRECT as fallback to prevent invalid config
+    // that Clash/Meta would reject with "'use' or 'proxies' missing"
+    if (!singlegroup["use"].IsDefined() && !singlegroup["proxies"].IsDefined()) {
+      filtered_nodelist.emplace_back("DIRECT");
+      singlegroup["proxies"] = filtered_nodelist;
+    }
     if (group_block)
       singlegroup.SetStyle(YAML::EmitterStyle::Block);
     else
