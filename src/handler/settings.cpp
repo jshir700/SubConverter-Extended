@@ -309,7 +309,7 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
       // Proxy priority: per-rule proxy= > &rules-proxy= > nothing
       std::string effective_proxy = x.Proxy.empty() ? rules_proxy : x.Proxy;
       // Interval priority: per-rule interval= (effective value > 0) > &rules-interval= (effective value > 0) > x.Interval (from config trailing number, effective value > 0) > 43200
-      int per_rule_interval = to_int(x.Interval, -1);
+      int per_rule_interval = x.Interval;
       int rules_interval_int = to_int(rules_interval, -1);
       int effective_interval = x.Interval;
       if (per_rule_interval > 0) {
