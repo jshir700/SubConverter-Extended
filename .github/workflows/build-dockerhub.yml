@@ -17,6 +17,10 @@ on:
   #   branches:
   #     - master
   #     - dev
+  workflow_run:
+    workflows: ["Auto-merge Dependabot PRs"]
+    types:
+      - completed
   workflow_dispatch: {}  # Manual trigger
   schedule:
     - cron: '0 19 * * 0'  # Run at 03:00 (UTC+8) on Mondays
@@ -33,7 +37,7 @@ jobs:
     name: "🔧 Prepare Metadata"
     runs-on: ubuntu-latest
     # Skip if [skip ci] and ensure schedule only runs on master
-    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master')"
+    if: "!contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master') && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')"
     outputs:
       sha_short: ${{ steps.vars.outputs.sha_short }}
       version: ${{ steps.version.outputs.version }}
