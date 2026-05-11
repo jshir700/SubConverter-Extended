@@ -13,10 +13,10 @@ on:
   #     - 'docker-compose.yml'
   #     - '.github/workflows/**'
   #     - '!.github/workflows/build-dockerhub.yml'
-  # pull_request:
-  #   branches:
-  #     - master
-  #     - dev
+  pull_request:
+    branches:
+      - master
+      - dev
   workflow_run:
     workflows: ["Auto-merge Dependabot PRs"]
     types:
