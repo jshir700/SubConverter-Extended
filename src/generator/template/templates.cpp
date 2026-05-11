@@ -328,7 +328,16 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
     int index = 0;
 
     if(!overwrite_original_rules && base_rule["rules"].IsDefined())
+    {
         rules = safe_as<string_array>(base_rule["rules"]);
+        writeLog(0, "[DEBUG] renderClashScript: loaded " + std::to_string(rules.size()) + " base rules from YAML", LOG_LEVEL_INFO);
+    }
+    else
+    {
+        writeLog(0, "[DEBUG] renderClashScript: no base rules loaded from YAML (overwrite_original_rules=" + std::to_string(overwrite_original_rules) + ", rules_defined=" + (base_rule["rules"].IsDefined() ? "true" : "false") + ")", LOG_LEVEL_INFO);
+    }
+
+    writeLog(0, "[DEBUG] renderClashScript: starting with " + std::to_string(ruleset_content_array.size()) + " rulesets, script=" + std::to_string(script) + ", remote_path_prefix='" + remote_path_prefix + "'", LOG_LEVEL_INFO);
 
     for(RulesetContent &x : ruleset_content_array)
     {
@@ -361,11 +370,13 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         {
             if(x.rule_type == RULESET_CLASH_IPCIDR || x.rule_type == RULESET_CLASH_DOMAIN || x.rule_type == RULESET_CLASH_CLASSICAL)
             {
+                writeLog(0, "[DEBUG] Clash-native ruleset '" + x.rule_path + "' type=" + std::to_string(x.rule_type) + " provider=" + std::to_string(x.provider), LOG_LEVEL_INFO);
                 // provider=false → inline expand (server-side fetch already done)
                 // provider=true → generate rule-provider
                 if(!x.provider)
                 {
                     // Inline expand: server-side fetch already done, expand directly
+                    writeLog(0, "[DEBUG]   → Clash-native inline expand for '" + x.rule_path + "'", LOG_LEVEL_INFO);
                     retrieved_rules = x.rule_content.get();
                     if(retrieved_rules.empty())
                     {
@@ -373,6 +384,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         continue;
                     }
                     retrieved_rules = convertRuleset(retrieved_rules, x.rule_type);
+                    size_t pre_count = rules.size();
                     char delimiter = getLineBreak(retrieved_rules);
                     strStrm.clear();
                     strStrm<<retrieved_rules;
@@ -387,6 +399,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         strLine = appendClashRuleTarget(strLine, rule_group);
                         rules.emplace_back(std::move(strLine));
                     }
+                    writeLog(0, "[DEBUG]   → Clash-native inline expand added " + std::to_string(rules.size() - pre_count) + " rules", LOG_LEVEL_INFO);
                     continue;
                 }
                 //rule_name = std::to_string(hash_(rule_group + rule_path));
@@ -445,58 +458,51 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     //    - x.provider=false → inline expand
                     // 3. clash_classical_ruleset → generate rule-provider (legacy &classic= behavior)
                     // 4. default → inline expand
+                    writeLog(0, "[DEBUG] SURGE ruleset '" + rule_path + "' group='" + rule_group + "' provider_explicit=" + std::to_string(x.provider_explicit) + " provider_override=" + std::to_string(x.provider_override) + " provider=" + std::to_string(x.provider) + " clash_classical_ruleset=" + std::to_string(clash_classical_ruleset) + " rule_type=" + std::to_string(x.rule_type), LOG_LEVEL_INFO);
                     if(x.provider_explicit)
                     {
                         // Per-rule ,provider= explicitly set
+                        writeLog(0, "[DEBUG]   → provider_explicit branch, provider=" + std::to_string(x.provider), LOG_LEVEL_INFO);
                         if(x.provider)
                         {
                             // ,provider=true or non-false: generate rule-provider
+                            writeLog(0, "[DEBUG]   → RULE-SET provider mode for '" + rule_name + "'", LOG_LEVEL_INFO);
                             if(!script)
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                             groups.emplace_back(rule_name);
+                            continue; // provider mode done, skip inline expansion
                         }
-                        else
-                        {
-                            // ,provider=false: inline expand (clear intermediate state)
-                            urls.erase(rule_name);
-                            names.erase(rule_name);
-                            rule_type.erase(rule_name);
-                            ruleset_interval.erase(rule_name);
-                            inline_expand = true;
-                        }
-                        continue;
+                        // else x.provider=false: fall through to inline expansion below
+                        writeLog(0, "[DEBUG]   → provider=false, falling through to inline expansion", LOG_LEVEL_INFO);
                     }
                     // No explicit ,provider=: check &rules-provider= global override
-                    if(x.provider_override)
+                    else if(x.provider_override)
                     {
                         // &rules-provider= was applied in refreshRulesets (ignores &classic=)
+                        writeLog(0, "[DEBUG]   → provider_override branch, provider=" + std::to_string(x.provider), LOG_LEVEL_INFO);
                         if(x.provider)
                         {
                             // &rules-provider=true: generate rule-provider
+                            writeLog(0, "[DEBUG]   → RULE-SET provider mode (override) for '" + rule_name + "'", LOG_LEVEL_INFO);
                             if(!script)
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                             groups.emplace_back(rule_name);
+                            continue; // provider mode done, skip inline expansion
                         }
-                        else
-                        {
-                            // &rules-provider=false: inline expand (clear intermediate state)
-                            urls.erase(rule_name);
-                            names.erase(rule_name);
-                            rule_type.erase(rule_name);
-                            ruleset_interval.erase(rule_name);
-                            inline_expand = true;
-                        }
-                        continue;
+                        // else &rules-provider=false: fall through to inline expansion below
+                        writeLog(0, "[DEBUG]   → &rules-provider=false, falling through to inline expansion", LOG_LEVEL_INFO);
                     }
                     // No ,provider= and no &rules-provider=: fall back to &classic= legacy behavior
                     if(clash_classical_ruleset)
                     {
+                        writeLog(0, "[DEBUG]   → classic mode (clash_classical_ruleset=true)", LOG_LEVEL_INFO);
                         if(!script)
                             rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                         groups.emplace_back(rule_name);
                         continue;
                     }
-                    // classic=false: inline expand
+                    // default (no explicit provider, no &rules-provider=, no &classic=): inline expand
+                    writeLog(0, "[DEBUG]   → default path: inline expand for '" + rule_name + "'", LOG_LEVEL_INFO);
                     // 清除已注册的中间状态，避免后续 for(groups) 循环生成 rule-providers 条目
                     urls.erase(rule_name);
                     names.erase(rule_name);
@@ -549,6 +555,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     }
                     // 步骤4：追加策略组，保留 Mihomo 复合规则中带逗号的 payload
                     rules.emplace_back(appendClashRuleTarget(strLine, rule_group));
+                    writeLog(0, "[DEBUG]   → inline expanded rule: '" + strLine + "'", LOG_LEVEL_DEBUG);
                 }
                 else if(startsWith(strLine, "DOMAIN-KEYWORD,"))
                 {
@@ -706,6 +713,9 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         }
     }
     else
+    {
         base_rule["rules"] = rules;
+        writeLog(0, "[DEBUG] renderClashScript: final rules count = " + std::to_string(rules.size()) + ", groups count = " + std::to_string(groups.size()), LOG_LEVEL_INFO);
+    }
     return 0;
 }
