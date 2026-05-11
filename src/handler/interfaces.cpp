@@ -408,35 +408,49 @@ inline std::string generateProviderHashFromDecodedUrl(
   return shortHash;
 }
 
-// Parse #ua= and #proxy= fragment parameters from a URL
+// Parse ^ua=, ^proxy=, ^provider=, ^interval= fragment parameters from a URL
 // Returns cleaned URL (without fragment) and extracted values
+// Format: subscription_url^ua=value&proxy=value2&provider=true
+// '^' separates URL from parameters (URL-safe, no encoding needed in &url=)
+// '&' separates individual parameters within the fragment
+// provider=true or non-false → generate proxy-provider; provider=false → inline expand
 static void parseUrlFragmentParams(const std::string &input,
                                     std::string &ua,
                                     std::string &proxy,
-                                    bool &inlined,
-                                    bool &inline_explicit,
+                                    bool &provider,
+                                    bool &provider_explicit,
+                                    std::string &interval,
+                                    bool &interval_explicit,
                                     std::string &clean_url) {
   clean_url = input;
-  size_t hash_pos = input.find('#');
-  if (hash_pos == std::string::npos)
-    return;
+  provider = false;
+  provider_explicit = false;
+  interval.clear();
+  interval_explicit = false;
 
-  std::string fragment = input.substr(hash_pos + 1);
-  clean_url = input.substr(0, hash_pos);
+  // Find the first '^' as the separator between URL and fragment parameters
+  size_t caret_pos = input.find('^');
+  if (caret_pos == input.npos)
+    return; // no fragment parameters
 
-  // Split fragment by '&' and look for ua=, proxy=, and inline=
-  inlined = false;
-  inline_explicit = false;
+  std::string fragment = input.substr(caret_pos + 1);
+  clean_url = input.substr(0, caret_pos);
+
+  // Split fragment by '&' and look for ua=, proxy=, provider=, and interval=
   string_array parts = split(fragment, "&");
   for (const std::string &part : parts) {
     if (startsWith(part, "ua=")) {
       ua = part.substr(3);
     } else if (startsWith(part, "proxy=")) {
       proxy = part.substr(6);
-    } else if (startsWith(part, "inline=")) {
-      std::string val = part.substr(7);
-      inlined = (val == "true");
-      inline_explicit = true;
+    } else if (startsWith(part, "provider=")) {
+      std::string val = part.substr(9);
+      // provider=true or non-false → generate provider; provider=false → inline expand
+      provider = (val != "false");
+      provider_explicit = true;
+    } else if (startsWith(part, "interval=")) {
+      interval = part.substr(9);
+      interval_explicit = true;
     }
   }
 }
@@ -713,13 +727,15 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   if (!argGlobalUA.empty())
     global.user_agent = argGlobalUA;
 
-  // Global parameters for subscription inline/UA/proxy behavior (per-URL override always takes priority)
-  std::string argProxysInline = getUrlArg(argument, "proxys-inline"),
-              argRulesInline = getUrlArg(argument, "rules-inline"),
+  // Global parameters for subscription/ruleset provider/UA/proxy/interval behavior (per-URL/per-rule override always takes priority)
+  std::string argProxysProvider = getUrlArg(argument, "proxys-provider"),
+              argRulesProvider = getUrlArg(argument, "rules-provider"),
               argProxysUA = getUrlArg(argument, "proxys-ua"),
               argRulesUA = getUrlArg(argument, "rules-ua"),
               argProxysProxy = getUrlArg(argument, "proxys-proxy"),
-              argRulesProxy = getUrlArg(argument, "rules-proxy");
+              argRulesProxy = getUrlArg(argument, "rules-proxy"),
+              argProxysInterval = getUrlArg(argument, "proxys-interval"),
+              argRulesInterval = getUrlArg(argument, "rules-interval");
 
   /// switches with default value
   tribool argUpload = getUrlArg(argument, "upload"),
@@ -1015,11 +1031,11 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   if (ext.enable_rule_generator && !ext.nodelist && !lSimpleSubscription) {
     if (lCustomRulesets != global.customRulesets)
       refreshRulesets(lCustomRulesets, lRulesetContent,
-                      argRulesInline, argRulesUA, argRulesProxy);
+                      argRulesProvider, argRulesUA, argRulesProxy, argRulesInterval);
     else {
       if (global.updateRulesetOnRequest)
         refreshRulesets(global.customRulesets, global.rulesetsContent,
-                        argRulesInline, argRulesUA, argRulesProxy);
+                        argRulesProvider, argRulesUA, argRulesProxy, argRulesInterval);
       lRulesetContent = global.rulesetsContent;
     }
   }
@@ -1108,10 +1124,12 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
       std::string url;
       std::string tag;
       std::string provider;
-      std::string ua;       // per-URL User-Agent from #ua= fragment
-      std::string proxy;    // per-URL proxy from #proxy= fragment
-      bool inlined = false; // if true, server-side fetch instead of proxy-provider
-      bool inline_explicit = false; // if true, #inline= was explicitly set in URL fragment
+      std::string ua;       // per-URL User-Agent from ^ua= fragment
+      std::string proxy;    // per-URL proxy from ^proxy= fragment
+      std::string interval; // per-URL interval from ^interval= fragment
+      bool provider_mode = false; // if true, generate proxy-provider; if false, server-side fetch & inline expand
+      bool provider_explicit = false; // if true, ^provider= was explicitly set in URL fragment
+      bool interval_explicit = false; // if true, ^interval= was explicitly set in URL fragment
       bool url_decoded = false;
     };
     std::vector<SubscriptionLinkItem> subscription_urls; // HTTP/HTTPS 订阅链接
@@ -1139,13 +1157,14 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
                  LOG_LEVEL_INFO);
         node_urls.push_back(node_link);
       } else if (isLink(link)) {
-        // HTTP/HTTPS 订阅链接 - 检查 #ua=, #proxy=, #inline= 片段参数
-        std::string clean_link, per_url_ua, per_url_proxy;
-        bool per_url_inlined = false, per_url_inline_explicit = false;
-        parseUrlFragmentParams(link, per_url_ua, per_url_proxy, per_url_inlined, per_url_inline_explicit, clean_link);
+        // HTTP/HTTPS 订阅链接 - 检查 ^ua=, ^proxy=, ^provider=, ^interval= 片段参数
+        std::string clean_link, per_url_ua, per_url_proxy, per_url_interval;
+        bool per_url_provider_mode = false, per_url_provider_explicit = false, per_url_interval_explicit = false;
+        parseUrlFragmentParams(link, per_url_ua, per_url_proxy, per_url_provider_mode, per_url_provider_explicit,
+                               per_url_interval, per_url_interval_explicit, clean_link);
         writeLog(0,
                  "Detected subscription link: '" + clean_link +
-                     "', will create provider.",
+                     "'.",
                  LOG_LEVEL_INFO);
         if (!per_url_ua.empty())
           writeLog(0,
@@ -1155,14 +1174,25 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
           writeLog(0,
                    "  -> per-URL proxy: '" + per_url_proxy + "'",
                    LOG_LEVEL_INFO);
-        if (per_url_inlined)
+        if (!per_url_interval.empty())
           writeLog(0,
-                   "  -> inlined mode (server-side fetch).",
+                   "  -> per-URL interval: '" + per_url_interval + "'",
                    LOG_LEVEL_INFO);
+        if (per_url_provider_explicit) {
+          if (per_url_provider_mode)
+            writeLog(0,
+                     "  -> provider mode (generate proxy-provider).",
+                     LOG_LEVEL_INFO);
+          else
+            writeLog(0,
+                     "  -> inline mode (server-side fetch).",
+                     LOG_LEVEL_INFO);
+        }
         subscription_urls.push_back(
             {clean_link, tagged.tag, tagged.provider,
-             per_url_ua, per_url_proxy, per_url_inlined,
-             per_url_inline_explicit, tagged.link_decoded});
+             per_url_ua, per_url_proxy, per_url_interval,
+             per_url_provider_mode, per_url_provider_explicit,
+             per_url_interval_explicit, tagged.link_decoded});
       } else {
         std::string node_link = link;
         if (tagged.has_tag)
@@ -1174,23 +1204,46 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     }
 
     // 将订阅链接分为两组：内联订阅（服务端拉取）和 provider 订阅（创建 proxy-provider）
-    // &proxys-inline= 为没有显式 #inline= 的订阅提供全局默认值
+    // &proxys-provider= 为没有显式 ^provider= 的订阅提供全局默认值
     std::vector<SubscriptionLinkItem> provider_subs, inline_subs;
-    bool global_inline = (argProxysInline == "true");
     for (const auto &item : subscription_urls) {
-      if (item.inlined) {
-        // 显式 #inline=true —— 始终内联
-        inline_subs.push_back(item);
-      } else if (global_inline && !item.inline_explicit) {
-        // &proxys-inline=true 且无显式 #inline= —— 应用全局默认
-        writeLog(0,
-                 "  -> Globally inlined by &proxys-inline=true for subscription '" +
-                     item.url + "' (no explicit #inline=).",
-                 LOG_LEVEL_INFO);
-        inline_subs.push_back(item);
+      if (item.provider_explicit) {
+        // ^provider= 显式设置 —— 不受 &proxys-provider= 影响（req 1.1, 1.2, 11.4）
+        if (item.provider_mode) {
+          // ^provider=true 或非 false —— 生成 proxy-provider（req 1.1）
+          writeLog(0,
+                   "  -> Explicit provider mode (^provider=true) for subscription '" +
+                       item.url + "'.",
+                   LOG_LEVEL_INFO);
+          provider_subs.push_back(item);
+        } else {
+          // ^provider=false —— 服务端拉取（req 1.2）
+          writeLog(0,
+                   "  -> Explicit inline mode (^provider=false) for subscription '" +
+                       item.url + "'.",
+                   LOG_LEVEL_INFO);
+          inline_subs.push_back(item);
+        }
       } else {
-        // Provider 模式（默认行为）
-        provider_subs.push_back(item);
+        // 没有 ^provider= 参数 —— 检查 &proxys-provider= 全局参数（req 1.3）
+        if (argProxysProvider.empty()) {
+          // 没有 &proxys-provider= —— 默认生成 proxy-provider（req 1.3.3）
+          provider_subs.push_back(item);
+        } else if (argProxysProvider != "false") {
+          // &proxys-provider=true 或非 false —— 生成 proxy-provider（req 1.3.1, 11.1）
+          writeLog(0,
+                   "  -> Globally set to provider mode by &proxys-provider for subscription '" +
+                       item.url + "' (no explicit ^provider=).",
+                   LOG_LEVEL_INFO);
+          provider_subs.push_back(item);
+        } else {
+          // &proxys-provider=false —— 服务端拉取（req 1.3.2, 11.2）
+          writeLog(0,
+                   "  -> Globally inlined by &proxys-provider=false for subscription '" +
+                       item.url + "' (no explicit ^provider=).",
+                   LOG_LEVEL_INFO);
+          inline_subs.push_back(item);
+        }
       }
     }
 
@@ -1289,7 +1342,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
                  LOG_LEVEL_INFO);
         provider.url = item.url_decoded ? item.url
                                         : urlDecode(item.url); // 解码 URL
-        // UA 优先级: #ua= > &proxys-ua= > global.user_agent (config, 可被 &global-ua= 覆盖)
+        // UA 优先级: #ua= > &proxys-ua= > 不写 User-Agent（global-ua 不影响 proxy-provider）
         if (!item.ua.empty()) {
           provider.user_agent = item.ua;
           writeLog(0,
@@ -1303,9 +1356,29 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
                        "': '" + argProxysUA + "'",
                    LOG_LEVEL_INFO);
         } else {
-          provider.user_agent = global.user_agent;
+          provider.user_agent = "";  // 不写 User-Agent 头，global-ua 不影响 proxy-provider
         }
-        provider.interval = 3600;    // 固定使用 3600 秒（1小时）
+        // Interval 优先级: ^interval= (有效值) > &proxys-interval= (有效值) > 43200 (默认12小时)
+        int per_url_interval = to_int(item.interval, -1);
+        int global_interval = to_int(argProxysInterval, -1);
+        if (item.interval_explicit && per_url_interval > 0) {
+          provider.interval = per_url_interval;
+          writeLog(0,
+                   "  -> Using per-URL interval for provider '" + provider.name +
+                       "': '" + item.interval + "'",
+                   LOG_LEVEL_INFO);
+        } else if (!argProxysInterval.empty() && global_interval > 0) {
+          provider.interval = global_interval;
+          writeLog(0,
+                   "  -> Using global &proxys-interval for provider '" + provider.name +
+                       "': '" + argProxysInterval + "'",
+                   LOG_LEVEL_INFO);
+        } else {
+          provider.interval = 43200;
+          writeLog(0,
+                   "  -> Using default interval (43200) for provider '" + provider.name + "'.",
+                   LOG_LEVEL_INFO);
+        }
         provider.groupId = groupID;
         provider.path = "./providers/" + provider.name + ".yaml";
 
@@ -1503,6 +1576,35 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
       output_content =
           proxyToClash(nodes, base_content, lRulesetContent, lCustomProxyGroups,
                        argTarget == "clashr", ext);
+    }
+
+    // &global-ua= injects/overwrites global-ua: line in final output (highest priority)
+    if (!argGlobalUA.empty()) {
+      std::string ua_key = "global-ua:";
+      size_t ua_pos = output_content.find(ua_key);
+      std::string ua_line = "global-ua: " + argGlobalUA;
+      if (ua_pos != std::string::npos) {
+        // Replace existing global-ua: line (preserve original content structure)
+        size_t line_end = output_content.find('\n', ua_pos);
+        size_t len = (line_end != std::string::npos) ? (line_end - ua_pos) : (output_content.size() - ua_pos);
+        output_content.replace(ua_pos, len, ua_line);
+        writeLog(0, "Replaced existing global-ua line with &global-ua value: '" + argGlobalUA + "'",
+                 LOG_LEVEL_INFO);
+      } else {
+        // Inject global-ua: at the top (after YAML document separator if present)
+        std::string inject_line = ua_line + "\n";
+        if (output_content.find("---") == 0) {
+          size_t first_nl = output_content.find('\n');
+          if (first_nl != std::string::npos)
+            output_content.insert(first_nl + 1, inject_line);
+          else
+            output_content = inject_line + output_content;
+        } else {
+          output_content = inject_line + output_content;
+        }
+        writeLog(0, "Injected global-ua line with &global-ua value: '" + argGlobalUA + "'",
+                 LOG_LEVEL_INFO);
+      }
     }
 
     if (argUpload)

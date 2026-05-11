@@ -234,9 +234,10 @@ void readRuleset(YAML::Node node, string_array &dest, bool scope_limit = true) {
 
 void refreshRulesets(RulesetConfigs &ruleset_list,
                      std::vector<RulesetContent> &ruleset_content_array,
-                     const std::string &rules_inline,
+                     const std::string &rules_provider,
                      const std::string &rules_ua,
-                     const std::string &rules_proxy) {
+                     const std::string &rules_proxy,
+                     const std::string &rules_interval) {
   eraseElements(ruleset_content_array);
   std::string rule_group, rule_url, rule_url_typed, interval;
   RulesetContent rc;
@@ -244,13 +245,28 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
   std::string proxy = parseProxy(global.proxyRuleset);
 
   for (RulesetConfig &x : ruleset_list) {
-    // &rules-inline= global default: inline rulesets without explicit ,inline=
-    if (rules_inline == "true" && !x.inline_explicit) {
-      x.Inlined = true;
-      writeLog(0,
-               "  -> Globally inlined by &rules-inline=true for ruleset '" +
-                   x.Url + "' (no explicit ,inline=).",
-               LOG_LEVEL_INFO);
+    // Apply &rules-provider= global default for rulesets WITHOUT explicit ,provider=
+    // &rules-provider=true or non-false → generate rule-provider
+    // &rules-provider=false → inline expand
+    // No &rules-provider= → leave to &classic= behavior
+    if (!x.provider_explicit && !rules_provider.empty()) {
+      if (rules_provider != "false") {
+        // &rules-provider=true or non-false: generate rule-provider (ignore &classic=)
+        x.Provider = true;
+        x.provider_override = true;
+        writeLog(0,
+                 "  -> Globally set to provider mode by &rules-provider for ruleset '" +
+                     x.Url + "' (no explicit ,provider=).",
+                 LOG_LEVEL_INFO);
+      } else {
+        // &rules-provider=false: inline expand (ignore &classic=)
+        x.Provider = false;
+        x.provider_override = true;
+        writeLog(0,
+                 "  -> Globally inlined by &rules-provider=false for ruleset '" +
+                     x.Url + "' (no explicit ,provider=).",
+                 LOG_LEVEL_INFO);
+      }
     }
     rule_group = x.Group;
     rule_url = x.Url;
@@ -269,7 +285,9 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
             0,
             "",
             "",
-            false};
+            false,   // provider=false (inline expand)
+            false,   // provider_explicit=false
+            false};  // provider_override=false ([] inline rules are never overridden)
     } else {
       ruleset_type type = RULESET_SURGE;
       rule_url_typed = rule_url;
@@ -284,12 +302,23 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
                "Updating ruleset url '" + rule_url + "' with group '" +
                    rule_group + "'.",
                LOG_LEVEL_INFO);
-      // UA priority: per-rule ua= > &rules-ua= > global.user_agent (config, overridable by &global-ua=)
+      // UA priority: per-rule ua= > &rules-ua= > nothing (global-ua does NOT affect rule-provider)
       std::string effective_ua = x.UserAgent.empty()
-          ? (rules_ua.empty() ? global.user_agent : rules_ua)
+          ? (rules_ua.empty() ? "" : rules_ua)
           : x.UserAgent;
       // Proxy priority: per-rule proxy= > &rules-proxy= > nothing
       std::string effective_proxy = x.Proxy.empty() ? rules_proxy : x.Proxy;
+      // Interval priority: per-rule interval= (effective value > 0) > &rules-interval= (effective value > 0) > x.Interval (from config trailing number, effective value > 0) > 43200
+      int per_rule_interval = to_int(x.Interval, -1);
+      int rules_interval_int = to_int(rules_interval, -1);
+      int effective_interval = x.Interval;
+      if (per_rule_interval > 0) {
+        effective_interval = per_rule_interval;
+      } else if (rules_interval_int > 0) {
+        effective_interval = rules_interval_int;
+      } else {
+        effective_interval = 43200;
+      }
 
       rc = {rule_group,
             rule_url,
@@ -297,10 +326,12 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
             type,
             fetchFileAsync(rule_url, proxy, global.cacheRuleset, true,
                            global.asyncFetchRuleset, effective_ua),
-            x.Interval,
+            effective_interval,
             effective_ua,
             effective_proxy,
-            x.Inlined};
+            x.Provider,
+            x.provider_explicit,
+            x.provider_override};
     }
     ruleset_content_array.emplace_back(std::move(rc));
   }

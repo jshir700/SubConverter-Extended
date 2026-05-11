@@ -1,0 +1,5 @@
+CompileFlags:
+  Add:
+    - "-I./include"
+    - "-I./src"
+    - "-std=c++20"

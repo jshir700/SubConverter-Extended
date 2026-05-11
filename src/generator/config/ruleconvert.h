@@ -29,7 +29,9 @@ struct RulesetContent
     int update_interval = 0;
     std::string user_agent;  // per-rule User-Agent for fetching and rule-provider header
     std::string proxy;       // per-rule proxy for rule-provider: set via "proxy=" in ruleset config
-    bool inlined = false;    // if true, inline expand instead of rule-provider
+    bool provider = false;   // if true, generate rule-provider; if false, inline expand instead
+    bool provider_explicit = false;  // if true, provider= was explicitly set per-rule (distinguishes from default/global)
+    bool provider_override = false;  // if true, &rules-provider= global was applied (overrides &classic=)
 };
 
 std::string convertRuleset(const std::string &content, int type);

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <numeric>
+#include <unordered_set>
 
 #include "config/regmatch.h"
 #include "generator/config/subexport.h"
@@ -953,13 +954,38 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
   if (ext.use_proxy_provider && !ext.providers.empty()) {
     YAML::Node provider_node;
 
+    // Build set of known proxy/provider/group names for existence validation
+    std::unordered_set<std::string> known_proxies;
+    for (const Proxy &node : nodes) {
+      known_proxies.insert(node.Remark);
+    }
+    for (const ProxyProvider &pp : ext.providers) {
+      known_proxies.insert(pp.name);
+    }
+    for (const ProxyGroupConfig &pg : extra_proxy_group) {
+      known_proxies.insert(pg.Name);
+      for (const std::string &proxy_name : pg.Proxies) {
+        known_proxies.insert(proxy_name);
+      }
+      for (const std::string &provider_name : pg.UsingProvider) {
+        known_proxies.insert("provider:" + provider_name);
+      }
+    }
+
     for (const ProxyProvider &p : ext.providers) {
       YAML::Node single_provider;
       single_provider["type"] = "http";
       single_provider["url"] = p.url;
       single_provider["interval"] = p.interval;
-      if (!p.proxy.empty())
+      // Proxy existence check: only write proxy: field if the proxy name exists
+      // in known proxies, proxy-providers, or proxy-groups
+      if (!p.proxy.empty() && known_proxies.find(p.proxy) != known_proxies.end())
         single_provider["proxy"] = p.proxy;
+      else if (!p.proxy.empty())
+        writeLog(0,
+                 "  -> Skipping proxy field for provider '" + p.name +
+                     "': proxy '" + p.proxy + "' not found in known proxies/proxy-groups.",
+                 LOG_LEVEL_INFO);
       single_provider["path"] = p.path;
       if (!p.user_agent.empty()) {
         single_provider["header"]["User-Agent"].push_back(make_yaml_quoted_scalar(p.user_agent));

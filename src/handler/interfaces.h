@@ -12,9 +12,10 @@
 std::string parseProxy(const std::string &source);
 
 void refreshRulesets(RulesetConfigs &ruleset_list, std::vector<RulesetContent> &rca,
-                     const std::string &rules_inline = "",
+                     const std::string &rules_provider = "",
                      const std::string &rules_ua = "",
-                     const std::string &rules_proxy = "");
+                     const std::string &rules_proxy = "",
+                     const std::string &rules_interval = "");
 void readConf();
 int simpleGenerator();
 std::string convertRuleset(const std::string &content, int type);

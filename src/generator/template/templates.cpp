@@ -361,13 +361,15 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         {
             if(x.rule_type == RULESET_CLASH_IPCIDR || x.rule_type == RULESET_CLASH_DOMAIN || x.rule_type == RULESET_CLASH_CLASSICAL)
             {
-                if(x.inlined)
+                // provider=false → inline expand (server-side fetch already done)
+                // provider=true → generate rule-provider
+                if(!x.provider)
                 {
-                    // Internal expansion mode: server-side fetch already done, inline expand directly
+                    // Inline expand: server-side fetch already done, expand directly
                     retrieved_rules = x.rule_content.get();
                     if(retrieved_rules.empty())
                     {
-                        writeLog(0, "Failed to fetch or empty inlined ruleset: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
+                        writeLog(0, "Failed to fetch or empty ruleset: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
                         continue;
                     }
                     retrieved_rules = convertRuleset(retrieved_rules, x.rule_type);
@@ -434,6 +436,59 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         ruleset_user_agent[rule_name] = x.user_agent;
                     if(!x.proxy.empty())
                         ruleset_proxy[rule_name] = x.proxy;
+                    // Priority chain (inverted from old inline= semantics):
+                    // 1. x.provider_explicit → per-rule ,provider= (ignores &rules-provider= and &classic=)
+                    //    - x.provider=true  → generate rule-provider
+                    //    - x.provider=false → inline expand
+                    // 2. x.provider_override → &rules-provider= global was applied (ignores &classic=)
+                    //    - x.provider=true  → generate rule-provider
+                    //    - x.provider=false → inline expand
+                    // 3. clash_classical_ruleset → generate rule-provider (legacy &classic= behavior)
+                    // 4. default → inline expand
+                    if(x.provider_explicit)
+                    {
+                        // Per-rule ,provider= explicitly set
+                        if(x.provider)
+                        {
+                            // ,provider=true or non-false: generate rule-provider
+                            if(!script)
+                                rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                            groups.emplace_back(rule_name);
+                        }
+                        else
+                        {
+                            // ,provider=false: inline expand (clear intermediate state)
+                            urls.erase(rule_name);
+                            names.erase(rule_name);
+                            rule_type.erase(rule_name);
+                            ruleset_interval.erase(rule_name);
+                            inline_expand = true;
+                        }
+                        continue;
+                    }
+                    // No explicit ,provider=: check &rules-provider= global override
+                    if(x.provider_override)
+                    {
+                        // &rules-provider= was applied in refreshRulesets (ignores &classic=)
+                        if(x.provider)
+                        {
+                            // &rules-provider=true: generate rule-provider
+                            if(!script)
+                                rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                            groups.emplace_back(rule_name);
+                        }
+                        else
+                        {
+                            // &rules-provider=false: inline expand (clear intermediate state)
+                            urls.erase(rule_name);
+                            names.erase(rule_name);
+                            rule_type.erase(rule_name);
+                            ruleset_interval.erase(rule_name);
+                            inline_expand = true;
+                        }
+                        continue;
+                    }
+                    // No ,provider= and no &rules-provider=: fall back to &classic= legacy behavior
                     if(clash_classical_ruleset)
                     {
                         if(!script)
@@ -441,7 +496,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         groups.emplace_back(rule_name);
                         continue;
                     }
-                    // 方案A：classic=false 时直接内联展开规则，不生成 rule-providers
+                    // classic=false: inline expand
                     // 清除已注册的中间状态，避免后续 for(groups) 循环生成 rule-providers 条目
                     urls.erase(rule_name);
                     names.erase(rule_name);

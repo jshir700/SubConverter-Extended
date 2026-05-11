@@ -138,8 +138,8 @@ namespace toml
             conf.Interval = find_or<Integer>(v, "interval", 86400);
             conf.UserAgent = find_or<String>(v, "ua", "");
             conf.Proxy = find_or<String>(v, "proxy", "");
-            conf.Inlined = find_or<bool>(v, "inline", false);
-            conf.inline_explicit = v.contains("inline");
+            conf.Provider = find_or<bool>(v, "provider", false);
+            conf.provider_explicit = v.contains("provider");
             return conf;
         }
     };
@@ -296,24 +296,25 @@ namespace INIBinding
                     confs.emplace_back(std::move(conf));
                     continue;
                 }
-                // Scan for ,inline= first, extract and strip before proxy/ua parsing
-                String::size_type inlinepos = x.find(",inline=");
-                if(inlinepos != String::npos)
+                // Scan for ,provider= first, extract and strip before proxy/ua parsing
+                // provider=true or non-false → generate rule-provider; provider=false → inline expand
+                String::size_type providerpos = x.find(",provider=");
+                if(providerpos != String::npos)
                 {
-                    String inline_val = x.substr(inlinepos + 8);
-                    String::size_type next_comma = inline_val.find(",");
+                    String provider_val = x.substr(providerpos + 10);
+                    String::size_type next_comma = provider_val.find(",");
                     if(next_comma != String::npos)
                     {
-                        conf.Inlined = (inline_val.substr(0, next_comma) == "true");
-                        conf.inline_explicit = true;
-                        // Remove ,inline=Value from x, rejoin with remaining content
-                        x = x.substr(0, inlinepos) + inline_val.substr(next_comma);
+                        conf.Provider = (provider_val.substr(0, next_comma) != "false");
+                        conf.provider_explicit = true;
+                        // Remove ,provider=Value from x, rejoin with remaining content
+                        x = x.substr(0, providerpos) + provider_val.substr(next_comma);
                     }
                     else
                     {
-                        conf.Inlined = (inline_val == "true");
-                        conf.inline_explicit = true;
-                        x = x.substr(0, inlinepos);
+                        conf.Provider = (provider_val != "false");
+                        conf.provider_explicit = true;
+                        x = x.substr(0, providerpos);
                     }
                 }
                 // Check for per-rule proxy= parameter (e.g. "Group,URL,proxy=MyProxy")
@@ -380,33 +381,60 @@ namespace INIBinding
                             conf.Url = base;
                     }
                 }
-                // Check for per-rule ua= parameter (e.g. "Group,URL,ua=MyAgent" or "Group,URL,Interval,ua=MyAgent")
+                // Check for per-rule interval= keyword parameter (e.g. "Group,URL,interval=3600")
                 else
                 {
-                    String::size_type uapos = x.find(",ua=");
-                    if(uapos != String::npos)
+                    String::size_type intervalpos = x.find(",interval=");
+                    if(intervalpos != String::npos)
                     {
-                        conf.UserAgent = x.substr(uapos + 4);
-                        String base = x.substr(pos + 1, uapos - pos - 1);
-                        String::size_type base_epos = base.rfind(",");
-                        if(base_epos != String::npos)
+                        String interval_suffix = x.substr(intervalpos + 10);
+                        String::size_type next_comma = interval_suffix.find(",");
+                        if(next_comma != String::npos)
                         {
-                            conf.Interval = to_int(base.substr(base_epos + 1), 0);
-                            conf.Url = base.substr(0, base_epos);
+                            conf.Interval = to_int(interval_suffix.substr(0, next_comma), 0);
+                            // Remove ,interval=Value from x and rejoin
+                            x = x.substr(0, intervalpos) + interval_suffix.substr(next_comma);
                         }
                         else
-                            conf.Url = base;
+                        {
+                            conf.Interval = to_int(interval_suffix, 0);
+                            x = x.substr(0, intervalpos);
+                        }
+                        // After extracting interval=, extract URL from remaining x
+                        String::size_type epos2 = x.rfind(",");
+                        if(pos != epos2)
+                            conf.Url = x.substr(pos + 1, epos2 - pos - 1);
+                        else
+                            conf.Url = x.substr(pos + 1);
                     }
                     else
                     {
-                        String::size_type epos = x.rfind(",");
-                        if(pos != epos)
+                        // Check for per-rule ua= parameter (e.g. "Group,URL,ua=MyAgent" or "Group,URL,Interval,ua=MyAgent")
+                        String::size_type uapos = x.find(",ua=");
+                        if(uapos != String::npos)
                         {
-                            conf.Interval = to_int(x.substr(epos + 1), 0);
-                            conf.Url = x.substr(pos + 1, epos - pos - 1);
+                            conf.UserAgent = x.substr(uapos + 4);
+                            String base = x.substr(pos + 1, uapos - pos - 1);
+                            String::size_type base_epos = base.rfind(",");
+                            if(base_epos != String::npos)
+                            {
+                                conf.Interval = to_int(base.substr(base_epos + 1), 0);
+                                conf.Url = base.substr(0, base_epos);
+                            }
+                            else
+                                conf.Url = base;
                         }
                         else
-                            conf.Url = x.substr(pos + 1);
+                        {
+                            String::size_type epos = x.rfind(",");
+                            if(pos != epos)
+                            {
+                                conf.Interval = to_int(x.substr(epos + 1), 0);
+                                conf.Url = x.substr(pos + 1, epos - pos - 1);
+                            }
+                            else
+                                conf.Url = x.substr(pos + 1);
+                        }
                     }
                 }
                 confs.emplace_back(std::move(conf));
