@@ -28,6 +28,8 @@ struct RulesetContent
     std::shared_future<std::string> rule_content;
     int update_interval = 0;
     std::string user_agent;  // per-rule User-Agent for fetching and rule-provider header
+    std::string proxy;       // per-rule proxy for rule-provider: set via "proxy=" in ruleset config
+    bool inlined = false;    // if true, inline expand instead of rule-provider
 };
 
 std::string convertRuleset(const std::string &content, int type);

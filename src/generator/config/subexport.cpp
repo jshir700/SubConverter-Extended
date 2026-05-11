@@ -958,7 +958,8 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
       single_provider["type"] = "http";
       single_provider["url"] = p.url;
       single_provider["interval"] = p.interval;
-      single_provider["proxy"] = p.proxy.empty() ? "DIRECT" : p.proxy;
+      if (!p.proxy.empty())
+        single_provider["proxy"] = p.proxy;
       single_provider["path"] = p.path;
       if (!p.user_agent.empty()) {
         single_provider["header"]["User-Agent"].push_back(make_yaml_quoted_scalar(p.user_agent));
