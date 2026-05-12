@@ -474,6 +474,14 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         }
                         // else x.provider=false: fall through to inline expansion below
                         writeLog(0, "[DEBUG]   → provider=false, falling through to inline expansion", LOG_LEVEL_INFO);
+                        // Clear intermediate state for inline expansion
+                        urls.erase(rule_name);
+                        names.erase(rule_name);
+                        rule_type.erase(rule_name);
+                        ruleset_interval.erase(rule_name);
+                        ruleset_user_agent.erase(rule_name);
+                        ruleset_proxy.erase(rule_name);
+                        inline_expand = true;
                     }
                     // No explicit ,provider=: check &rules-provider= global override
                     else if(x.provider_override)
@@ -491,6 +499,14 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         }
                         // else &rules-provider=false: fall through to inline expansion below
                         writeLog(0, "[DEBUG]   → &rules-provider=false, falling through to inline expansion", LOG_LEVEL_INFO);
+                        // Clear intermediate state for inline expansion
+                        urls.erase(rule_name);
+                        names.erase(rule_name);
+                        rule_type.erase(rule_name);
+                        ruleset_interval.erase(rule_name);
+                        ruleset_user_agent.erase(rule_name);
+                        ruleset_proxy.erase(rule_name);
+                        inline_expand = true;
                     }
                     // No ,provider= and no &rules-provider=: default → generate rule-provider
                     else
