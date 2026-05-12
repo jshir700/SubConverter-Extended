@@ -17,7 +17,7 @@ struct RulesetConfig
     String Group;
     //RulesetType Type = RulesetType::SurgeRuleset;
     String Url;
-    Integer Interval = 86400;
+    Integer Interval = 0;
     String UserAgent;  // per-rule User-Agent: set via "ua=" in INI or "user_agent" in TOML
     String Proxy;      // per-rule proxy for rule-provider: set via "proxy=" in INI or "proxy" in TOML
     bool Provider = false;  // if true, generate rule-provider; if false, server-side fetch & inline expand

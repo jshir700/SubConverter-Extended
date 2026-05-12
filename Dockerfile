@@ -63,7 +63,7 @@ WORKDIR /
 
 # 安装 Debian 构建依赖
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+    apt-get install -y --fix-missing --no-install-recommends \
     git g++ build-essential cmake python3 python3-pip \
     pkg-config curl \
     libcurl4-openssl-dev libpcre2-dev rapidjson-dev \

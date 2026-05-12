@@ -312,7 +312,7 @@ std::string findFileName(const std::string &path)
     return path.substr(pos + 1, pos2 - pos - 1);
 }
 
-int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules, bool clash_classical_ruleset)
+int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules)
 {
     nlohmann::json data;
     std::string match_group, geoips, retrieved_rules;
@@ -450,15 +450,15 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     if(!x.proxy.empty())
                         ruleset_proxy[rule_name] = x.proxy;
                     // Priority chain (inverted from old inline= semantics):
-                    // 1. x.provider_explicit → per-rule ,provider= (ignores &rules-provider= and &classic=)
+                    // 1. x.provider_explicit → per-rule ,provider= (ignores &rules-provider=)
                     //    - x.provider=true  → generate rule-provider
                     //    - x.provider=false → inline expand
-                    // 2. x.provider_override → &rules-provider= global was applied (ignores &classic=)
+                    // 2. x.provider_override → &rules-provider= global was applied
                     //    - x.provider=true  → generate rule-provider
                     //    - x.provider=false → inline expand
-                    // 3. clash_classical_ruleset → generate rule-provider (legacy &classic= behavior)
-                    // 4. default → inline expand
-                    writeLog(0, "[DEBUG] SURGE ruleset '" + rule_path + "' group='" + rule_group + "' provider_explicit=" + std::to_string(x.provider_explicit) + " provider_override=" + std::to_string(x.provider_override) + " provider=" + std::to_string(x.provider) + " clash_classical_ruleset=" + std::to_string(clash_classical_ruleset) + " rule_type=" + std::to_string(x.rule_type), LOG_LEVEL_INFO);
+                    // 3. default (no ,provider=, no &rules-provider=) → generate rule-provider
+                    //    (replaces legacy &classic= behavior; no more default inline expand)
+                    writeLog(0, "[DEBUG] SURGE ruleset '" + rule_path + "' group='" + rule_group + "' provider_explicit=" + std::to_string(x.provider_explicit) + " provider_override=" + std::to_string(x.provider_override) + " provider=" + std::to_string(x.provider) + " rule_type=" + std::to_string(x.rule_type), LOG_LEVEL_INFO);
                     if(x.provider_explicit)
                     {
                         // Per-rule ,provider= explicitly set
@@ -478,7 +478,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     // No explicit ,provider=: check &rules-provider= global override
                     else if(x.provider_override)
                     {
-                        // &rules-provider= was applied in refreshRulesets (ignores &classic=)
+                        // &rules-provider= was applied in refreshRulesets
                         writeLog(0, "[DEBUG]   → provider_override branch, provider=" + std::to_string(x.provider), LOG_LEVEL_INFO);
                         if(x.provider)
                         {
@@ -492,23 +492,17 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         // else &rules-provider=false: fall through to inline expansion below
                         writeLog(0, "[DEBUG]   → &rules-provider=false, falling through to inline expansion", LOG_LEVEL_INFO);
                     }
-                    // No ,provider= and no &rules-provider=: fall back to &classic= legacy behavior
-                    if(clash_classical_ruleset)
+                    // No ,provider= and no &rules-provider=: default → generate rule-provider
+                    else
                     {
-                        writeLog(0, "[DEBUG]   → classic mode (clash_classical_ruleset=true)", LOG_LEVEL_INFO);
+                        // Default behavior: generate rule-provider for ALL remote rule types
+                        // (replaces legacy &classic= behavior; no more default inline expand)
+                        writeLog(0, "[DEBUG]   → default path: generate RULE-SET for '" + rule_name + "'", LOG_LEVEL_INFO);
                         if(!script)
                             rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                         groups.emplace_back(rule_name);
                         continue;
                     }
-                    // default (no explicit provider, no &rules-provider=, no &classic=): inline expand
-                    writeLog(0, "[DEBUG]   → default path: inline expand for '" + rule_name + "'", LOG_LEVEL_INFO);
-                    // 清除已注册的中间状态，避免后续 for(groups) 循环生成 rule-providers 条目
-                    urls.erase(rule_name);
-                    names.erase(rule_name);
-                    rule_type.erase(rule_name);
-                    ruleset_interval.erase(rule_name);
-                    inline_expand = true;
                 }
                 else
                     continue;
