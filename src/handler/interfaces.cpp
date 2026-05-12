@@ -165,6 +165,7 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
               group = urlSafeBase64Decode(getUrlArg(argument, "group"));
   std::string output_content, dummy;
   int type_int = to_int(type, 0);
+  tribool argDedup = getUrlArg(argument, "dedup");
 
   if (url.empty() || type.empty() || (type_int == 2 && group.empty()) ||
       (type_int < 1 || type_int > 6)) {
@@ -241,6 +242,7 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
     return 0;
   };
 
+  std::unordered_set<std::string> seenRules;
   lineSize = output_content.size();
   output_content.clear();
   output_content.reserve(lineSize);
@@ -306,6 +308,38 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
                          return startsWith(strLine, type);
                        }))
         continue;
+      {
+        string_size dpos = strLine.find(',');
+        if(dpos != std::string::npos) {
+          string_size dpos2 = strLine.find(',', dpos + 1);
+          if(dpos2 != std::string::npos) {
+            std::string type = strLine.substr(0, dpos);
+            std::string value = strLine.substr(dpos + 1, dpos2 - dpos - 1);
+            std::string key;
+            // IP-CIDR/IP-CIDR6: include no-resolve flag
+            if(type == "IP-CIDR" || type == "IP-CIDR6") {
+              if(strLine.find(",no-resolve") != std::string::npos)
+                key = type + "," + value + ",no-resolve";
+              else
+                key = type + "," + value;
+            }
+            // AND/OR/NOT/SUB-RULE: everything except last field
+            else if(type == "AND" || type == "OR" || type == "NOT" || type == "SUB-RULE") {
+              string_size last_comma = strLine.rfind(',');
+              if(last_comma != std::string::npos && last_comma > dpos2)
+                key = strLine.substr(0, last_comma);
+              else
+                key = type + "," + value;
+            }
+            // Default: TYPE,VALUE only
+            else {
+              key = type + "," + value;
+            }
+            if(argDedup.get(true) && !seenRules.emplace(key).second)
+              continue;
+          }
+        }
+      }
       output_content += "  - ";
     default:
       break;
@@ -725,6 +759,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
           argAppendUserinfo = getUrlArg(argument, "append_info");
   tribool argPrependInsert = getUrlArg(argument, "prepend"),
           argTLS13 = getUrlArg(argument, "tls13");
+  tribool argDedup = getUrlArg(argument, "dedup");
 
   std::string base_content, output_content;
   ProxyGroupConfigs lCustomProxyGroups = global.customProxyGroups;
@@ -841,6 +876,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   ext.enable_rule_generator = global.enableRuleGen;
   ext.overwrite_original_rules = global.overwriteOriginalRules;
   ext.managed_config_prefix = global.managedConfigPrefix;
+  ext.dedup = argDedup.get(true);
 
   /// load external configuration
   std::string userProvidedConfig = getUrlArg(argument, "config");

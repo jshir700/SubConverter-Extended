@@ -1241,7 +1241,7 @@ std::string proxyToClash(std::vector<Proxy> &nodes,
   /*
   if(ext.enable_rule_generator)
       rulesetToClash(yamlnode, ruleset_content_array,
-  ext.overwrite_original_rules, ext.clash_new_field_name);
+  ext.overwrite_original_rules, ext.clash_new_field_name, ext.dedup);
 
   return YAML::Dump(yamlnode);
   */
@@ -1283,7 +1283,7 @@ std::string proxyToClash(std::vector<Proxy> &nodes,
 
   std::string output_content =
       rulesetToClashStr(yamlnode, ruleset_content_array,
-                        ext.overwrite_original_rules, ext.clash_new_field_name);
+                        ext.overwrite_original_rules, ext.clash_new_field_name, ext.dedup);
 
   // 提取 proxy-providers，手动控制输出顺序
   // 使用之前在 998-1002 行已提取的 proxy_providers_yaml

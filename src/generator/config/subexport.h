@@ -58,6 +58,7 @@ struct extra_settings {
   bool use_proxy_provider = true;       // 默认启用 proxy-provider 模式
   std::vector<ProxyProvider> providers; // provider 列表
   bool authorized = false;
+  bool dedup = true;                    // 是否按规则类型去重
 
   extra_settings() = default;
   extra_settings(const extra_settings &) = delete;
