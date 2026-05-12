@@ -1,5 +1,6 @@
 #include <mutex>
 #include <string>
+#include <unordered_set>
 
 #include "config/binding.h"
 #include "handler/webget.h"
