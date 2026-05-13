@@ -27,7 +27,7 @@ struct Settings {
               managedConfigPrefix;
   int listenPort = 25500, maxPendingConns = 10, maxConcurThreads = 4;
   bool prependInsert = true, skipFailedLinks = false;
-  const bool APIMode = true; // Hardcoded for security - cannot be changed
+  bool APIMode = true; // Hardcoded for security - cannot be changed
   bool writeManagedConfig = false, enableRuleGen = true,
        updateRulesetOnRequest = false, overwriteOriginalRules = true;
   bool printDbgInfo = false, CFWChildProcess = false, appendUserinfo = true,

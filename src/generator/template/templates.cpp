@@ -1,5 +1,6 @@
 #include <string>
-#include <algorithm>
+#include <mutex>
+#include <shared_mutex>
 #include <map>
 #include <sstream>
 #include <filesystem>
@@ -15,54 +16,6 @@
 #include "utils/urlencode.h"
 #include "utils/yamlcpp_extra.h"
 #include "templates.h"
-
-// 在 ruleconvert.cpp 中定义的全局规则类型白名单
-extern string_array ClashRuleTypes;
-
-// 为 Clash 规则追加策略组目标，保留 AND/OR/NOT/SUB-RULE 等复合规则中括号内的逗号
-// 以及末尾的 ,no-resolve 标记
-static std::string appendClashRuleTarget(const std::string &rule, const std::string &group) {
-    // 简单规则：无括号，快速路径
-    if(rule.find('(') == std::string::npos) {
-        // 保留末尾的 ,no-resolve
-        if(rule.size() >= 11) {
-            std::string suffix = rule.substr(rule.size() - 11);
-            if(suffix == ",no-resolve")
-                return rule.substr(0, rule.size() - 11) + "," + group + ",no-resolve";
-        }
-        // 如果已有策略组则替换
-        string_size last_comma = rule.rfind(',');
-        if(last_comma != std::string::npos) {
-            std::string after_last = rule.substr(last_comma + 1);
-            if(after_last != "no-resolve")
-                return rule.substr(0, last_comma) + "," + group;
-        }
-        return rule + "," + group;
-    }
-    
-    // 复合规则（AND/OR/NOT/SUB-RULE）：找到最顶层最后一个逗号
-    // 从右向左扫描，跟踪括号深度
-    int depth = 0;
-    string_size last_toplevel_comma = std::string::npos;
-    for(int i = (int)rule.size() - 1; i >= 0; i--) {
-        if(rule[i] == ')') depth++;
-        else if(rule[i] == '(') depth--;
-        else if(rule[i] == ',' && depth == 0) {
-            last_toplevel_comma = (string_size)i;
-            break;
-        }
-    }
-    
-    if(last_toplevel_comma == std::string::npos)
-        return rule + "," + group;
-    
-    std::string after_last = rule.substr(last_toplevel_comma + 1);
-    if(after_last == "no-resolve")
-        return rule.substr(0, last_toplevel_comma) + "," + group + ",no-resolve";
-    else
-        return rule.substr(0, last_toplevel_comma) + "," + group;
-}
-
 
 namespace inja
 {
@@ -157,8 +110,25 @@ int render_template(const std::string &content, const template_args &vars, std::
     for(auto &x : vars.local_vars)
         parse_json_pointer(data["local"], x.first, x.second);
 
-    inja::Environment env;
+    // Inja template compilation cache: compiled templates are cached by content hash
+    // to avoid redundant parsing on every render() call.
+    static std::unordered_map<size_t, inja::Template> template_cache;
+    static std::shared_mutex template_cache_mutex;
+    static constexpr size_t TEMPLATE_CACHE_MAX = 256;
 
+    size_t content_hash = std::hash<std::string>{}(content);
+    inja::Template compiled_template;
+    bool is_cached = false;
+    {
+        std::shared_lock lock(template_cache_mutex);
+        auto it = template_cache.find(content_hash);
+        if (it != template_cache.end()) {
+            compiled_template = it->second;
+            is_cached = true;
+        }
+    }
+
+    inja::Environment env;
     env.set_trim_blocks(true);
     env.set_lstrip_blocks(true);
     env.set_line_statement("#~#");
@@ -294,7 +264,20 @@ int render_template(const std::string &content, const template_args &vars, std::
     try
     {
         std::stringstream out;
-        env.render_to(out, env.parse(content), data);
+        if (is_cached) {
+            // Use cached compiled template — avoids Inja's parse() cost
+            env.render_to(out, compiled_template, data);
+        } else {
+            auto parsed = env.parse(content);
+            // Cache the compiled template under write lock (populate on miss)
+            {
+                std::unique_lock lock(template_cache_mutex);
+                if (template_cache.size() >= TEMPLATE_CACHE_MAX)
+                    template_cache.clear();
+                template_cache[content_hash] = parsed;
+            }
+            env.render_to(out, parsed, data);
+        }
         output = out.str();
         return 0;
     }
@@ -366,22 +349,14 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
     string_map keywords, urls, names;
     std::map<std::string, bool> has_domain, has_ipcidr;
     std::map<std::string, int> ruleset_interval, rule_type;
-    std::map<std::string, std::string> ruleset_user_agent;  // per-rule User-Agent for rule-provider header
+    std::map<std::string, std::string> ruleset_user_agent;
     std::map<std::string, std::string> ruleset_proxy;       // per-rule proxy for rule-provider
     string_array rules;
     int index = 0;
+    bool ruleset_inline_expand = false;                     // true when provider=false for SURGE-type rulesets
 
     if(!overwrite_original_rules && base_rule["rules"].IsDefined())
-    {
         rules = safe_as<string_array>(base_rule["rules"]);
-        writeLog(0, "[DEBUG] renderClashScript: loaded " + std::to_string(rules.size()) + " base rules from YAML", LOG_LEVEL_INFO);
-    }
-    else
-    {
-        writeLog(0, "[DEBUG] renderClashScript: no base rules loaded from YAML (overwrite_original_rules=" + std::to_string(overwrite_original_rules) + ", rules_defined=" + (base_rule["rules"].IsDefined() ? "true" : "false") + ")", LOG_LEVEL_INFO);
-    }
-
-    writeLog(0, "[DEBUG] renderClashScript: starting with " + std::to_string(ruleset_content_array.size()) + " rulesets, script=" + std::to_string(script) + ", remote_path_prefix='" + remote_path_prefix + "'", LOG_LEVEL_INFO);
 
     for(RulesetContent &x : ruleset_content_array)
     {
@@ -405,8 +380,10 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 continue;
             }
             if(startsWith(strLine, "FINAL"))
-                strLine = "MATCH";
-            strLine = appendClashRuleTarget(strLine, rule_group);
+                strLine.replace(0, 5, "MATCH");
+            strLine += "," + rule_group;
+            if(count_least(strLine, ',', 3))
+                strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
             rules.emplace_back(std::move(strLine));
             continue;
         }
@@ -414,13 +391,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         {
             if(x.rule_type == RULESET_CLASH_IPCIDR || x.rule_type == RULESET_CLASH_DOMAIN || x.rule_type == RULESET_CLASH_CLASSICAL)
             {
-                writeLog(0, "[DEBUG] Clash-native ruleset '" + x.rule_path + "' type=" + std::to_string(x.rule_type) + " provider=" + std::to_string(x.provider), LOG_LEVEL_INFO);
                 // provider=false → inline expand (server-side fetch already done)
                 // provider=true → generate rule-provider
                 if(!x.provider)
                 {
                     // Inline expand: server-side fetch already done, expand directly
-                    writeLog(0, "[DEBUG]   → Clash-native inline expand for '" + x.rule_path + "'", LOG_LEVEL_INFO);
                     retrieved_rules = x.rule_content.get();
                     if(retrieved_rules.empty())
                     {
@@ -428,7 +403,6 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         continue;
                     }
                     retrieved_rules = convertRuleset(retrieved_rules, x.rule_type);
-                    size_t pre_count = rules.size();
                     char delimiter = getLineBreak(retrieved_rules);
                     strStrm.clear();
                     strStrm<<retrieved_rules;
@@ -440,10 +414,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                             continue;
                         strLine = trimWhitespace(strLine, true, true);
                         if(strLine.empty()) continue;
-                        strLine = appendClashRuleTarget(strLine, rule_group);
+                        strLine += "," + rule_group;
+                        if(count_least(strLine, ',', 3))
+                            strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
                         rules.emplace_back(std::move(strLine));
                     }
-                    writeLog(0, "[DEBUG]   → Clash-native inline expand added " + std::to_string(rules.size() - pre_count) + " rules", LOG_LEVEL_INFO);
                     continue;
                 }
                 //rule_name = std::to_string(hash_(rule_group + rule_path));
@@ -475,7 +450,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 groups.emplace_back(rule_name);
                 continue;
             }
-            bool inline_expand = false;
+            bool ruleset_inline_expand = false;
             if(!remote_path_prefix.empty())
             {
                 if(fileExist(rule_path, true) || isLink(rule_path))
@@ -491,9 +466,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     ruleset_interval[rule_name] = x.update_interval;
                     if(!x.user_agent.empty())
                         ruleset_user_agent[rule_name] = x.user_agent;
-                    if(!x.proxy.empty())
-                        ruleset_proxy[rule_name] = x.proxy;
-                    // Priority chain (inverted from old inline= semantics):
+                    // Priority chain:
                     // 1. x.provider_explicit → per-rule ,provider= (ignores &rules-provider=)
                     //    - x.provider=true  → generate rule-provider
                     //    - x.provider=false → inline expand
@@ -501,63 +474,52 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     //    - x.provider=true  → generate rule-provider
                     //    - x.provider=false → inline expand
                     // 3. default (no ,provider=, no &rules-provider=) → generate rule-provider
-                    //    (replaces legacy &classic= behavior; no more default inline expand)
-                    writeLog(0, "[DEBUG] SURGE ruleset '" + rule_path + "' group='" + rule_group + "' provider_explicit=" + std::to_string(x.provider_explicit) + " provider_override=" + std::to_string(x.provider_override) + " provider=" + std::to_string(x.provider) + " rule_type=" + std::to_string(x.rule_type), LOG_LEVEL_INFO);
+                    //    (replaces legacy &classic= behavior)
                     if(x.provider_explicit)
                     {
                         // Per-rule ,provider= explicitly set
-                        writeLog(0, "[DEBUG]   → provider_explicit branch, provider=" + std::to_string(x.provider), LOG_LEVEL_INFO);
                         if(x.provider)
                         {
                             // ,provider=true or non-false: generate rule-provider
-                            writeLog(0, "[DEBUG]   → RULE-SET provider mode for '" + rule_name + "'", LOG_LEVEL_INFO);
                             if(!script)
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                             groups.emplace_back(rule_name);
-                            continue; // provider mode done, skip inline expansion
+                            continue;
                         }
-                        // else x.provider=false: fall through to inline expansion below
-                        writeLog(0, "[DEBUG]   → provider=false, falling through to inline expansion", LOG_LEVEL_INFO);
-                        // Clear intermediate state for inline expansion
+                        // ,provider=false: inline expand (clear intermediate state)
                         urls.erase(rule_name);
                         names.erase(rule_name);
                         rule_type.erase(rule_name);
                         ruleset_interval.erase(rule_name);
                         ruleset_user_agent.erase(rule_name);
                         ruleset_proxy.erase(rule_name);
-                        inline_expand = true;
+                        ruleset_inline_expand = true;
+                        // fall through to inline expansion code below
                     }
                     // No explicit ,provider=: check &rules-provider= global override
                     else if(x.provider_override)
                     {
-                        // &rules-provider= was applied in refreshRulesets
-                        writeLog(0, "[DEBUG]   → provider_override branch, provider=" + std::to_string(x.provider), LOG_LEVEL_INFO);
                         if(x.provider)
                         {
-                            // &rules-provider=true: generate rule-provider
-                            writeLog(0, "[DEBUG]   → RULE-SET provider mode (override) for '" + rule_name + "'", LOG_LEVEL_INFO);
                             if(!script)
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                             groups.emplace_back(rule_name);
-                            continue; // provider mode done, skip inline expansion
+                            continue;
                         }
-                        // else &rules-provider=false: fall through to inline expansion below
-                        writeLog(0, "[DEBUG]   → &rules-provider=false, falling through to inline expansion", LOG_LEVEL_INFO);
-                        // Clear intermediate state for inline expansion
+                        // &rules-provider=false: inline expand (clear intermediate state)
                         urls.erase(rule_name);
                         names.erase(rule_name);
                         rule_type.erase(rule_name);
                         ruleset_interval.erase(rule_name);
                         ruleset_user_agent.erase(rule_name);
                         ruleset_proxy.erase(rule_name);
-                        inline_expand = true;
+                        ruleset_inline_expand = true;
+                        // fall through to inline expansion code below
                     }
                     // No ,provider= and no &rules-provider=: default → generate rule-provider
+                    // This replaces the legacy &classic= parameter which has been removed.
                     else
                     {
-                        // Default behavior: generate rule-provider for ALL remote rule types
-                        // (replaces legacy &classic= behavior; no more default inline expand)
-                        writeLog(0, "[DEBUG]   → default path: generate RULE-SET for '" + rule_name + "'", LOG_LEVEL_INFO);
                         if(!script)
                             rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                         groups.emplace_back(rule_name);
@@ -590,26 +552,16 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/')) //empty lines and comments are ignored
                     continue;
 
-                if(inline_expand && !script)
+                if(ruleset_inline_expand && !script)
                 {
-                    // 内联展开模式：与原版 rulesetToClashStr() 行为完全对齐
-                    // 步骤1：去首尾空白
+                    // Inline expansion mode: add ALL rule types directly into the rules list.
+                    // No RULE-SET entries are generated; all rules are expanded inline.
                     strLine = trimWhitespace(strLine, true, true);
-                    lineSize = strLine.size();
-                    if(!lineSize || strLine[0] == ';' || strLine[0] == '#' || (lineSize >= 2 && strLine[0] == '/' && strLine[1] == '/'))
-                        continue;
-                    // 步骤2：过滤不支持的规则类型（ClashRuleTypes 白名单）
-                    if(std::none_of(ClashRuleTypes.begin(), ClashRuleTypes.end(), [&strLine](const std::string& type){ return startsWith(strLine, type); }))
-                        continue;
-                    // 步骤3：剥离行内 // 注释
-                    if(strFind(strLine, "//"))
-                    {
-                        strLine.erase(strLine.find("//"));
-                        strLine = trimWhitespace(strLine);
-                    }
-                    // 步骤4：追加策略组，保留 Mihomo 复合规则中带逗号的 payload
-                    rules.emplace_back(appendClashRuleTarget(strLine, rule_group));
-                    writeLog(0, "[DEBUG]   → inline expanded rule: '" + strLine + "'", LOG_LEVEL_DEBUG);
+                    if(strLine.empty()) continue;
+                    strLine += "," + rule_group;
+                    if(count_least(strLine, ',', 3))
+                        strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
+                    rules.emplace_back(std::move(strLine));
                 }
                 else if(startsWith(strLine, "DOMAIN-KEYWORD,"))
                 {
@@ -648,8 +600,9 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         has_no_resolve = true;
                 }
             }
-            // 内联展开模式下：规则已逐条写入 rules，无需生成 RULE-SET 引用，也不加入 groups
-            if(!inline_expand)
+            // In inline expansion mode: skip RULE-SET generation and groups
+            // (all rules were already added inline in the while loop above)
+            if(!ruleset_inline_expand)
             {
                 if(has_domain[rule_name] && !script)
                     rules.emplace_back("RULE-SET," + rule_name + " (Domain)," + rule_group);
@@ -767,9 +720,6 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         }
     }
     else
-    {
         base_rule["rules"] = rules;
-        writeLog(0, "[DEBUG] renderClashScript: final rules count = " + std::to_string(rules.size()) + ", groups count = " + std::to_string(groups.size()), LOG_LEVEL_INFO);
-    }
     return 0;
 }

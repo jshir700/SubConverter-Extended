@@ -3,6 +3,7 @@
 
 #include <yaml-cpp/yaml.h>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // Cross-version double-quoting helper for yaml-cpp.
@@ -22,14 +23,15 @@ inline YAML::Node make_yaml_quoted_scalar(const std::string &value)
 template <typename T> void operator >> (const YAML::Node& node, T& i)
 {
     if(node.IsDefined() && !node.IsNull()) //fail-safe
-        i = node.as<T>();
+        i = node.as<std::remove_const_t<T>>();
 };
 
-template <typename T> T safe_as (const YAML::Node& node)
+template <typename T> std::remove_const_t<T> safe_as (const YAML::Node& node)
 {
+    using U = std::remove_const_t<T>;
     if(node.IsDefined() && !node.IsNull())
-        return node.as<T>();
-    return T();
+        return node.as<U>();
+    return U();
 };
 
 template <typename T> void operator >>= (const YAML::Node& node, T& i)
