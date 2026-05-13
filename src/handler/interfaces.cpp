@@ -1884,7 +1884,10 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS) {
     writeLog(0, "Load profile failed! Reason: Empty Profile section",
              LOG_LEVEL_ERROR);
     *status_code = 500;
-    return "Broken profile!";
+    return "Invalid profile: [Profile] section is empty.\n"
+           "无效配置：[Profile] 配置段为空。\n"
+           "Please add at least one profile entry before requesting it.\n"
+           "请至少添加一个 profile 条目后再请求。";
   }
   // Token authentication has been disabled - these checks are removed
   // All authentication logic is now bypassed
