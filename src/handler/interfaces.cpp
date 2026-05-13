@@ -169,7 +169,10 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
   if (url.empty() || type.empty() || (type_int == 2 && group.empty()) ||
       (type_int < 1 || type_int > 6)) {
     *status_code = 400;
-    return "Invalid request!";
+    return "Invalid request: missing or invalid ruleset parameters.\n"
+           "无效请求：规则集参数缺失或无效。\n"
+           "Required: url and type=1..6; group is required when type=2.\n"
+           "必须提供 url 和 type=1..6；当 type=2 时还必须提供 group。";
   }
 
   std::string proxy = parseProxy(global.proxyRuleset);
