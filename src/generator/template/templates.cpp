@@ -19,6 +19,50 @@
 // 在 ruleconvert.cpp 中定义的全局规则类型白名单
 extern string_array ClashRuleTypes;
 
+// 为 Clash 规则追加策略组目标，保留 AND/OR/NOT/SUB-RULE 等复合规则中括号内的逗号
+// 以及末尾的 ,no-resolve 标记
+static std::string appendClashRuleTarget(const std::string &rule, const std::string &group) {
+    // 简单规则：无括号，快速路径
+    if(rule.find('(') == std::string::npos) {
+        // 保留末尾的 ,no-resolve
+        if(rule.size() >= 11) {
+            std::string suffix = rule.substr(rule.size() - 11);
+            if(suffix == ",no-resolve")
+                return rule.substr(0, rule.size() - 11) + "," + group + ",no-resolve";
+        }
+        // 如果已有策略组则替换
+        string_size last_comma = rule.rfind(',');
+        if(last_comma != std::string::npos) {
+            std::string after_last = rule.substr(last_comma + 1);
+            if(after_last != "no-resolve")
+                return rule.substr(0, last_comma) + "," + group;
+        }
+        return rule + "," + group;
+    }
+    
+    // 复合规则（AND/OR/NOT/SUB-RULE）：找到最顶层最后一个逗号
+    // 从右向左扫描，跟踪括号深度
+    int depth = 0;
+    string_size last_toplevel_comma = std::string::npos;
+    for(int i = (int)rule.size() - 1; i >= 0; i--) {
+        if(rule[i] == ')') depth++;
+        else if(rule[i] == '(') depth--;
+        else if(rule[i] == ',' && depth == 0) {
+            last_toplevel_comma = (string_size)i;
+            break;
+        }
+    }
+    
+    if(last_toplevel_comma == std::string::npos)
+        return rule + "," + group;
+    
+    std::string after_last = rule.substr(last_toplevel_comma + 1);
+    if(after_last == "no-resolve")
+        return rule.substr(0, last_toplevel_comma) + "," + group + ",no-resolve";
+    else
+        return rule.substr(0, last_toplevel_comma) + "," + group;
+}
+
 
 namespace inja
 {

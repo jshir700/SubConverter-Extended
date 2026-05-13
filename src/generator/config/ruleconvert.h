@@ -27,18 +27,21 @@ struct RulesetContent
     int rule_type = RULESET_SURGE;
     std::shared_future<std::string> rule_content;
     int update_interval = 0;
-    std::string user_agent;  // per-rule User-Agent for fetching and rule-provider header
-    std::string proxy;       // per-rule proxy for rule-provider: set via "proxy=" in ruleset config
-    bool provider = false;   // if true, generate rule-provider; if false, inline expand instead
-    bool provider_explicit = false;  // if true, provider= was explicitly set per-rule (distinguishes from default/global)
-    bool provider_override = false;  // if true, &rules-provider= global was applied (overrides &classic=)
+    std::string user_agent;
+    std::string proxy;
+    bool provider = false;
+    bool provider_explicit = false;
+    bool provider_override = false;
 };
 
 std::string convertRuleset(const std::string &content, int type);
-std::string appendClashRuleTarget(const std::string &rule, const std::string &target, bool no_resolve_only = false);
 void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, bool dedup = true);
 std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, bool dedup = true);
 void rulesetToSurge(INIReader &base_rule, std::vector<RulesetContent> &ruleset_content_array, int surge_ver, bool overwrite_original_rules, const std::string& remote_path_prefix);
 void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules);
+
+// Containment-based dedup for Clash classical rules (TYPE,VALUE format)
+// Returns true if 'newKey' (TYPE,VALUE) is contained by any entry in 'seenKeys'
+bool containmentCheck(const std::string &newKey, const std::vector<std::string> &seenKeys);
 
 #endif // RULECONVERT_H_INCLUDED
