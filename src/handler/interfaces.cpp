@@ -1599,7 +1599,10 @@ std::string surgeConfToClash(RESPONSE_CALLBACK_ARGS) {
     url = global.defaultUrls;
   if (url.empty() || argument.substr(0, 5) != "link=") {
     *status_code = 400;
-    return "Invalid request!";
+    return "Invalid request: missing link parameter.\n"
+           "无效请求：缺少 link 参数。\n"
+           "Please call this endpoint as /surge2clash?link=<surge-config-url>.\n"
+           "请使用 /surge2clash?link=<Surge配置链接> 调用该接口。";
   }
   if (url == "link") {
     *status_code = 400;
