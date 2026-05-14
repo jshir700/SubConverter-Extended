@@ -1,3 +1,6 @@
+﻿#include <atomic>
+#include <map>
+#include <mutex>
 #include <string>
 #include <iostream>
 #include <thread>
@@ -19,7 +22,8 @@ std::string getTime(int type)
     gettimeofday(&tv, nullptr);
     snprintf(cMillis, 7, "%.6ld", (long)tv.tv_usec);
     lt = time(nullptr);
-    struct tm *local = localtime(&lt);
+    struct tm local_tm;
+    localtime_r(&lt, &local_tm);
     switch(type)
     {
     case 1:
@@ -34,7 +38,7 @@ std::string getTime(int type)
         format = "%Y-%m-%d %H:%M:%S";
         break;
     }
-    strftime(tmpbuf, 32, format.data(), local);
+    strftime(tmpbuf, 32, format.data(), &local_tm);
     return {tmpbuf};
 }
 
@@ -62,9 +66,14 @@ std::mutex log_mutex;
 LogFormat g_log_format = LOG_FORMAT_TEXT;
 static const char *log_level_names[] = {"FATAL", "ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE"};
 
+bool shouldLog(int level)
+{
+    return level <= global.logLevel;
+}
+
 void writeLog(int type, const std::string &content, int level)
 {
-    if(level > global.logLevel)
+    if(!shouldLog(level))
         return;
     std::lock_guard<std::mutex> lock(log_mutex);
     if(g_log_format == LOG_FORMAT_JSON)
@@ -72,12 +81,10 @@ void writeLog(int type, const std::string &content, int level)
         std::string ts(getTime(3));
         std::string pid = std::to_string(getpid());
         std::string tid = get_thread_name();
-        // Manual JSON construction (no dependency)
         std::cerr << "{\"time\":\"" << ts << "\",\"pid\":" << pid
                   << ",\"thread\":\"" << tid << "\""
                   << ",\"level\":\"" << log_level_names[level % 6]
                   << "\",\"message\":\"";
-        // Escape special characters in content for JSON safety
         for(char c : content)
         {
             switch(c)

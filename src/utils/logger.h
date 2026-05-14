@@ -1,4 +1,4 @@
-#ifndef LOGGER_H_INCLUDED
+﻿#ifndef LOGGER_H_INCLUDED
 #define LOGGER_H_INCLUDED
 
 #include <string>
@@ -30,12 +30,14 @@ enum
 };
 
 std::string getTime(int type);
+bool shouldLog(int level);
 void writeLog(int type, const std::string &content, int level = LOG_LEVEL_VERBOSE);
-std::string demangle(const char* name);
+bool shouldLog(int level);
 
 // Log format selection (set by settings.cpp)
 enum LogFormat { LOG_FORMAT_TEXT, LOG_FORMAT_JSON };
 extern LogFormat g_log_format;
+std::string demangle(const char* name);
 
 template <class T>
 std::string type(const T& t) {
