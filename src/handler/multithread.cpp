@@ -100,7 +100,7 @@ std::shared_future<std::string> fetchFileAsync(const std::string &path, const st
             return webGet(path, proxy, cache_ttl, nullptr, &headers);
         });
     else
-        return std::async(std::launch::async, [](){return std::string();});
+        return make_ready_future(std::string());
     return retVal;
 }
 

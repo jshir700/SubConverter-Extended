@@ -343,11 +343,12 @@ void groupGenerate(const std::string &rule, std::vector<Proxy> &nodelist,
   }
 #endif // NO_JS_RUNTIME
   else {
+    std::unordered_set<std::string> seen(filtered_nodelist.begin(),
+                                         filtered_nodelist.end());
     for (Proxy &x : nodelist) {
       if (applyMatcher(rule, real_rule, x) &&
           (real_rule.empty() || regFind(x.Remark, real_rule)) &&
-          std::find(filtered_nodelist.begin(), filtered_nodelist.end(),
-                    x.Remark) == filtered_nodelist.end())
+          seen.insert(x.Remark).second)
         filtered_nodelist.emplace_back(x.Remark);
     }
   }
@@ -977,15 +978,19 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
       single_provider["type"] = "http";
       single_provider["url"] = p.url;
       single_provider["interval"] = p.interval;
-      // Proxy existence check: only write proxy: field if the proxy name exists
-      // in known proxies, proxy-providers, or proxy-groups
-      if (!p.proxy.empty() && known_proxies.find(p.proxy) != known_proxies.end())
-        single_provider["proxy"] = p.proxy;
-      else if (!p.proxy.empty())
-        writeLog(0,
-                 "  -> Skipping proxy field for provider '" + p.name +
-                     "': proxy '" + p.proxy + "' not found in known proxies/proxy-groups.",
-                 LOG_LEVEL_INFO);
+      if (ext.provider_proxy_direct) {
+        if (!p.proxy.empty()) {
+          if (known_proxies.find(p.proxy) != known_proxies.end())
+            single_provider["proxy"] = p.proxy;
+          else
+            writeLog(0,
+                     "  -> Skipping proxy field for provider '" + p.name +
+                         "': proxy '" + p.proxy + "' not found in known proxies/proxy-groups.",
+                     LOG_LEVEL_INFO);
+        } else {
+          single_provider["proxy"] = "DIRECT";
+        }
+      }
       single_provider["path"] = p.path;
       if (!p.user_agent.empty()) {
         single_provider["header"]["User-Agent"].push_back(make_yaml_quoted_scalar(p.user_agent));
@@ -3359,7 +3364,8 @@ void proxyToSingBox(std::vector<Proxy> &nodes, rapidjson::Document &json,
       proxy.AddMember("inet4_bind_address",
                       rapidjson::StringRef(x.SelfIP.c_str()), allocator);
       rapidjson::Value addresses(rapidjson::kArrayType);
-      addresses.PushBack(rapidjson::StringRef(x.SelfIP.append("/32").c_str()),
+      std::string local_address = x.SelfIP + "/32";
+      addresses.PushBack(rapidjson::Value(local_address.c_str(), allocator),
                          allocator);
       //                if (!x.SelfIPv6.empty())
       //                    addresses.PushBack(rapidjson::StringRef(x.SelfIPv6.c_str()),

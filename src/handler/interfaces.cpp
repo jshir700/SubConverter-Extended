@@ -811,6 +811,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     tribool argSkipCertVerify = getUrlArg(argument, "scv"), argFilterDeprecated = getUrlArg(argument, "fdn"), argExpandRulesets = getUrlArg(argument, "expand"), argAppendUserinfo = getUrlArg(argument, "append_info");
     tribool argPrependInsert = getUrlArg(argument, "prepend"), argTLS13 = getUrlArg(argument, "tls13");
     tribool argDedup = getUrlArg(argument, "dedup");
+    tribool argProviderProxyDirect = getUrlArg(argument, "provider_proxy_direct");
 
     std::string base_content, output_content;
     ProxyGroupConfigs lCustomProxyGroups = global.customProxyGroups;
@@ -907,6 +908,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     ext.overwrite_original_rules = global.overwriteOriginalRules;
     ext.managed_config_prefix = global.managedConfigPrefix;
     ext.dedup = argDedup.get(true);
+    ext.provider_proxy_direct = argProviderProxyDirect.get(true);
 
     /// load external configuration
     if(argExternalConfig.empty())
