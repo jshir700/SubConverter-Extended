@@ -305,10 +305,12 @@ void processRemark(std::string &remark, const string_array &remarks_list,
       remark.append("\"");
     }
   }
-  std::string tempRemark = remark;
+    std::string tempRemark = remark;
   int cnt = 2;
-  while (std::find(remarks_list.cbegin(), remarks_list.cend(), tempRemark) !=
-         remarks_list.cend()) {
+  // Build a set of existing remarks for O(1) lookup — the input list is
+  // typically small (<1000), but the linear scan repeats on each collision.
+  std::unordered_set<std::string> seen(remarks_list.begin(), remarks_list.end());
+  while (seen.find(tempRemark) != seen.end()) {
     tempRemark = remark + " " + std::to_string(cnt);
     cnt++;
   }
@@ -978,18 +980,18 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
       single_provider["type"] = "http";
       single_provider["url"] = p.url;
       single_provider["interval"] = p.interval;
-      if (ext.provider_proxy_direct) {
-        if (!p.proxy.empty()) {
-          if (known_proxies.find(p.proxy) != known_proxies.end())
-            single_provider["proxy"] = p.proxy;
-          else
-            writeLog(0,
-                     "  -> Skipping proxy field for provider '" + p.name +
-                         "': proxy '" + p.proxy + "' not found in known proxies/proxy-groups.",
-                     LOG_LEVEL_INFO);
-        } else {
-          single_provider["proxy"] = "DIRECT";
-        }
+      // Per-provider proxy: only write proxy: when |proxy= is explicitly set
+      // and the target proxy exists in known proxies/proxy-groups.
+      // When |proxy= is not set, leave proxy field empty so the provider uses
+      // its default exit (controlled by &proxys-proxy= and other params).
+      if (!p.proxy.empty()) {
+        if (known_proxies.find(p.proxy) != known_proxies.end())
+          single_provider["proxy"] = p.proxy;
+        else
+          writeLog(0,
+                   "  -> Skipping proxy field for provider '" + p.name +
+                       "': proxy '" + p.proxy + "' not found in known proxies/proxy-groups.",
+                   LOG_LEVEL_INFO);
       }
       single_provider["path"] = p.path;
       if (!p.user_agent.empty()) {

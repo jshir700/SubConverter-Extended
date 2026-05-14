@@ -112,18 +112,18 @@ int render_template(const std::string &content, const template_args &vars, std::
     for(auto &x : vars.local_vars)
         parse_json_pointer(data["local"], x.first, x.second);
 
-    // Inja template compilation cache: compiled templates are cached by content hash
-    // to avoid redundant parsing on every render() call.
-    static std::unordered_map<size_t, inja::Template> template_cache;
+    // Inja template compilation cache: compiled templates are cached by content string
+    // to avoid redundant parsing on every render() call. Using content as key eliminates
+    // hash collision risk entirely.
+    static std::unordered_map<std::string, inja::Template> template_cache;
     static std::shared_mutex template_cache_mutex;
     static constexpr size_t TEMPLATE_CACHE_MAX = 256;
 
-    size_t content_hash = std::hash<std::string>{}(content);
     inja::Template compiled_template;
     bool is_cached = false;
     {
         std::shared_lock lock(template_cache_mutex);
-        auto it = template_cache.find(content_hash);
+        auto it = template_cache.find(content);
         if (it != template_cache.end()) {
             compiled_template = it->second;
             is_cached = true;
@@ -276,7 +276,7 @@ int render_template(const std::string &content, const template_args &vars, std::
                 std::unique_lock lock(template_cache_mutex);
                 if (template_cache.size() >= TEMPLATE_CACHE_MAX)
                     template_cache.clear();
-                template_cache[content_hash] = parsed;
+                template_cache[content] = parsed;
             }
             env.render_to(out, parsed, data);
         }
@@ -348,6 +348,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
     std::string strLine, rule_group, rule_path, rule_path_typed, rule_name, old_rule_name;
     std::stringstream strStrm;
     string_array vArray, groups;
+    std::unordered_set<std::string> groupsSet;
     string_map keywords, urls, names;
     std::map<std::string, bool> has_domain, has_ipcidr;
     std::map<std::string, int> ruleset_interval, rule_type;
@@ -437,7 +438,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 //rule_name = std::to_string(hash_(rule_group + rule_path));
                 rule_name = old_rule_name = urlDecode(findFileName(rule_path));
                 int idx = 2;
-                while(std::find(groups.begin(), groups.end(), rule_name) != groups.end())
+                while(groupsSet.find(rule_name) != groupsSet.end())
                     rule_name = old_rule_name + " " + std::to_string(idx++);
                 names[rule_name] = rule_group;
                 urls[rule_name] = "*" + rule_path;
@@ -458,9 +459,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 case RULESET_CLASH_CLASSICAL:
                     break;
                 }
-                if(!script)
-                    rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                 groups.emplace_back(rule_name);
+                groupsSet.emplace(rule_name);
                 continue;
             }
             bool ruleset_inline_expand = false;
@@ -471,7 +471,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     //rule_name = std::to_string(hash_(rule_group + rule_path));
                     rule_name = old_rule_name = urlDecode(findFileName(rule_path));
                     int idx = 2;
-                    while(std::find(groups.begin(), groups.end(), rule_name) != groups.end())
+                    while(groupsSet.find(rule_name) != groupsSet.end())
                         rule_name = old_rule_name + " " + std::to_string(idx++);
                     names[rule_name] = rule_group;
                     urls[rule_name] = rule_path_typed;
@@ -497,6 +497,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                             if(!script)
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                             groups.emplace_back(rule_name);
+                            groupsSet.emplace(rule_name);
                             continue;
                         }
                         // ,provider=false: inline expand (clear intermediate state)
@@ -517,6 +518,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                             if(!script)
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                             groups.emplace_back(rule_name);
+                            groupsSet.emplace(rule_name);
                             continue;
                         }
                         // &rules-provider=false: inline expand (clear intermediate state)
@@ -536,6 +538,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         if(!script)
                             rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                         groups.emplace_back(rule_name);
+                        groupsSet.emplace(rule_name);
                         continue;
                     }
                 }
@@ -638,7 +641,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 }
                 if(!has_domain[rule_name] && !has_ipcidr[rule_name] && !script)
                     rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
-                if(std::find(groups.begin(), groups.end(), rule_name) == groups.end())
+                if(groupsSet.emplace(rule_name).second)
                     groups.emplace_back(rule_name);
             }
         }
