@@ -1268,7 +1268,7 @@ std::string proxyToClash(std::vector<Proxy> &nodes,
 
     renderClashScript(yamlnode, ruleset_content_array,
                       ext.managed_config_prefix, ext.clash_script,
-                      ext.overwrite_original_rules);
+                      ext.overwrite_original_rules, ext.dedup);
     std::string result = YAML::Dump(yamlnode);
     bool has_providers = !proxy_providers_yaml.empty();
     if (has_providers) {
