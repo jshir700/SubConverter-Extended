@@ -1,4 +1,4 @@
-#include <string>
+﻿#include <string>
 #ifdef MALLOC_TRIM
 #include <malloc.h>
 #endif // MALLOC_TRIM
@@ -9,6 +9,7 @@
 #define CPPHTTPLIB_HEADER_MAX_LENGTH 819200
 #define CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH 819200
 #include "httplib.h"
+#include <zlib.h>
 
 #include "utils/base64/base64.h"
 #include "utils/logger.h"
@@ -64,7 +65,26 @@ static httplib::Server::Handler makeHandler(const responseRoute &rr) {
     if (content_type.empty()) {
       content_type = rr.content_type;
     }
-    response.set_content(result, content_type);
+    // gzip compression: compress responses > 1KB when client supports it
+    if(result.size() > 1024 &&
+       request.has_header("Accept-Encoding") &&
+       request.get_header_value("Accept-Encoding").find("gzip") != std::string::npos)
+    {
+      z_stream strm = {};
+      deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY);
+      strm.next_in = reinterpret_cast<Bytef*>(result.data());
+      strm.avail_in = static_cast<uInt>(result.size());
+      std::string compressed(deflateBound(&strm, result.size()), '\0');
+      strm.next_out = reinterpret_cast<Bytef*>(compressed.data());
+      strm.avail_out = static_cast<uInt>(compressed.size());
+      deflate(&strm, Z_FINISH);
+      compressed.resize(strm.total_out);
+      deflateEnd(&strm);
+      response.set_content(compressed, content_type);
+      response.set_header("Content-Encoding", "gzip");
+    } else {
+      response.set_content(result, content_type);
+    }
   };
 }
 
@@ -122,6 +142,14 @@ int WebServer::start_web_server_multi(listener_args *args) {
                  });
   server.set_pre_routing_handler([&](const httplib::Request &req,
                                      httplib::Response &res) {
+    // /health endpoint: health check for Docker/K8s — no auth required
+    if(req.path == "/health") {
+      res.status = 200;
+      std::string health_body = "{\"status\":\"ok\",\"version\":\"" VERSION "\"}";
+      res.set_content(health_body, "application/json");
+      return httplib::Server::HandlerResponse::Handled;
+    }
+
     if (shouldLog(LOG_LEVEL_DEBUG)) {
       writeLog(0,
                "Accept connection from client " + req.remote_addr + ":" +
