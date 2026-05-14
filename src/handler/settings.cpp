@@ -379,6 +379,7 @@ void readYAMLConf(YAML::Node &node)
     string_array tempArray;
 
     section["api_mode"] >> global.APIMode;
+    section["api_access_token"] >> global.accessToken;
     if(section["default_url"].IsSequence())
     {
         section["default_url"] >> tempArray;
@@ -686,6 +687,7 @@ void readTOMLConf(toml::value &root)
     bool filter = false;
     find_if_exist(section_common,
                   "api_mode", global.APIMode,
+                  "api_access_token", global.accessToken,
                   "exclude_remarks", global.excludeRemarks,
                   "include_remarks", global.includeRemarks,
                   "enable_insert", global.enableInsert,
@@ -956,6 +958,7 @@ void readConf()
 
     ini.enter_section("common");
     ini.get_bool_if_exist("api_mode", global.APIMode);
+    ini.get_if_exist("api_access_token", global.accessToken);
     ini.get_if_exist("default_url", global.defaultUrls);
     global.enableInsert = ini.get("enable_insert");
     ini.get_if_exist("insert_url", global.insertUrls);

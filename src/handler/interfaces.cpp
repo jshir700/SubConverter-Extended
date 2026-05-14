@@ -820,7 +820,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
     extra_settings ext;
     std::string subInfo, dummy;
     int interval = !argUpdateInterval.empty() ? to_int(argUpdateInterval, global.updateInterval) : global.updateInterval;
-    bool authorized = !global.APIMode || getUrlArg(argument, "token") == "", strict = !argUpdateStrict.empty() ? argUpdateStrict == "true" : global.updateStrict;
+    bool authorized = !global.APIMode || getUrlArg(argument, "token") == global.accessToken, strict = !argUpdateStrict.empty() ? argUpdateStrict == "true" : global.updateStrict;
 
     if(std::find(gRegexBlacklist.cbegin(), gRegexBlacklist.cend(), argIncludeRemark) != gRegexBlacklist.cend() || std::find(gRegexBlacklist.cbegin(), gRegexBlacklist.cend(), argExcludeRemark) != gRegexBlacklist.cend())
         return "Invalid request!";
@@ -2071,11 +2071,11 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS)
             *status_code = 403;
             return "Forbidden";
         }
-        token = "";
+        token = global.accessToken;
     }
     else
     {
-        if(token != "")
+        if(token != global.accessToken)
         {
             *status_code = 403;
             return "Forbidden";
@@ -2259,7 +2259,7 @@ int simpleGenerator()
         {
             profile = ini.get("profile");
             request.argument.emplace("name", profile);
-            request.argument.emplace("token", "");
+            request.argument.emplace("token", global.accessToken);
             request.argument.emplace("expand", "true");
             content = getProfile(request, response);
         }

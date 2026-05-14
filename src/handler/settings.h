@@ -32,8 +32,7 @@ struct Settings {
        updateRulesetOnRequest = false, overwriteOriginalRules = true;
   bool printDbgInfo = false, CFWChildProcess = false, appendUserinfo = true,
        asyncFetchRuleset = false, surgeResolveHostname = true;
-  // accessToken removed - token authentication is disabled
-  std::string basePath = "base";
+  std::string accessToken, basePath = "base";
   std::string custom_group;
   int logLevel = LOG_LEVEL_VERBOSE;
   long maxAllowedDownloadSize = 1048576L;
