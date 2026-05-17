@@ -43,9 +43,11 @@ jobs:
         id: check_docker_changes
         if: github.event_name == 'workflow_run'
         run: |
-          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          # Use diff-tree to correctly handle merge commits (shows all changed files
+          # from both parents, not just against the first parent).
+          CHANGED_FILES=$(git diff-tree --no-commit-id --diff-filter=ACDMR -r HEAD --name-only 2>/dev/null || echo "")
           echo "Changed files: $CHANGED_FILES"
-          if echo "$CHANGED_FILES" | tr ' ' '\n' | grep -qE '^(src/|CMakeLists\.txt|Dockerfile|bridge/|\.github/workflows/build-dockerhub\.yml)'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/|CMakeLists\.txt|Dockerfile|bridge/|\.github/workflows/build-dockerhub\.yml)'; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
@@ -53,7 +55,7 @@ jobs:
 
       - name: Skip if no Docker-relevant changes
         if: steps.check_docker_changes.outputs.changed == 'false'
-        run: echo "No Docker-relevant changes, skipping build" && exit 1
+        run: echo "No Docker-relevant changes, skipping build" && exit 0
 
       - name: Get short SHA
         id: vars
