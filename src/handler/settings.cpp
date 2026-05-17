@@ -1,6 +1,8 @@
 #include <string>
 #include <shared_mutex>
 #include <unordered_set>
+#include <cstdlib>
+#include <filesystem>
 #include <sys/stat.h>
 #include <toml.hpp>
 
@@ -10,6 +12,7 @@
 #include "server/webserver.h"
 #include "utils/logger.h"
 #include "utils/network.h"
+#include "utils/system.h"
 #include "interfaces.h"
 #include "multithread.h"
 #include "settings.h"
@@ -27,7 +30,7 @@ extern WebServer webServer;
 const std::map<std::string, ruleset_type> RulesetTypes = {{"clash-domain:", RULESET_CLASH_DOMAIN}, {"clash-ipcidr:", RULESET_CLASH_IPCIDR}, {"clash-classic:", RULESET_CLASH_CLASSICAL}, \
             {"quanx:", RULESET_QUANX}, {"surge:", RULESET_SURGE}};
 
-int importItems(string_array &target, bool scope_limit)
+int importItems(string_array &target, bool scope_limit, FetchContext context)
 {
     string_array result;
     std::stringstream ss;
@@ -46,7 +49,14 @@ int importItems(string_array &target, bool scope_limit)
         std::string proxy = parseProxy(global.proxyConfig);
 
         if(fileExist(path))
+        {
+            if(isPublicFetchRestricted(context) && !isTrustedLocalResourcePath(path))
+            {
+                writeLog(0, "Blocked public request from importing local file: " + path, LOG_LEVEL_WARNING);
+                continue;
+            }
             content = fileGet(path, scope_limit);
+        }
         else if(isLink(path))
             content = webGet(path, proxy, global.cacheConfig);
         else
@@ -86,6 +96,71 @@ toml::value parseToml(const std::string &content, const std::string &fname)
         writeLog(0, "TOML parse failed for '" + fname + "': " + std::string(e.what()), LOG_LEVEL_DEBUG);
         return toml::value();
     }
+}
+
+static bool parseBoolSetting(const std::string &value)
+{
+    std::string normalized = toLower(trimWhitespace(value, true, true));
+    return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on";
+}
+
+static bool pathInsideRoot(const std::string &path, const std::string &root)
+{
+    if(path.empty() || root.empty())
+        return false;
+    try
+    {
+        std::filesystem::path absolute_path = std::filesystem::weakly_canonical(std::filesystem::absolute(path));
+        std::filesystem::path absolute_root = std::filesystem::weakly_canonical(std::filesystem::absolute(root));
+        std::filesystem::path relative = std::filesystem::relative(absolute_path, absolute_root);
+        std::string rel = relative.generic_string();
+        return rel == "." || (!relative.is_absolute() && rel != ".." && !startsWith(rel, "../"));
+    }
+    catch(std::exception &e)
+    {
+        writeLog(0, e.what(), LOG_LEVEL_DEBUG);
+        return false;
+    }
+}
+
+static void finalizeSecuritySettings()
+{
+    std::string profile_override = getEnv("SUBCONVERTER_SECURITY_PROFILE");
+    if(!profile_override.empty())
+        global.securityProfile = profile_override;
+
+    std::string upload_override = getEnv("SUBCONVERTER_ALLOW_PUBLIC_UPLOAD");
+    if(!upload_override.empty())
+        global.allowPublicUpload = parseBoolSetting(upload_override);
+
+    global.securityProfile = toLower(trimWhitespace(global.securityProfile, true, true));
+    if(global.securityProfile != "lan" && global.securityProfile != "public" && global.securityProfile != "strict")
+    {
+        writeLog(0, "Invalid security.profile '" + global.securityProfile + "', falling back to lan.", LOG_LEVEL_WARNING);
+        global.securityProfile = "lan";
+    }
+
+    writeLog(0, "Security profile: " + global.securityProfile, LOG_LEVEL_INFO);
+}
+
+bool isPublicFetchRestricted(FetchContext context)
+{
+    return context == FetchContext::PublicRequest &&
+           (global.securityProfile == "public" || global.securityProfile == "strict");
+}
+
+bool isTrustedLocalResourcePath(const std::string &path)
+{
+    return pathInsideRoot(path, global.basePath) || pathInsideRoot(path, global.templatePath);
+}
+
+bool isPublicUploadAllowed()
+{
+    if(global.securityProfile == "lan")
+        return true;
+    if(global.securityProfile == "strict")
+        return false;
+    return global.allowPublicUpload;
 }
 
 void importItems(std::vector<toml::value> &root, const std::string &import_key, bool scope_limit = true)
@@ -656,6 +731,12 @@ void readYAMLConf(YAML::Node &node)
         node["advanced"]["async_fetch_ruleset"] >> global.asyncFetchRuleset;
         node["advanced"]["skip_failed_links"] >> global.skipFailedLinks;
     }
+    if(node["security"].IsDefined())
+    {
+        node["security"]["profile"] >> global.securityProfile;
+        node["security"]["allow_public_upload"] >> global.allowPublicUpload;
+    }
+    finalizeSecuritySettings();
     writeLog(0, "Load preference settings in YAML format completed.", LOG_LEVEL_INFO);
 }
 
@@ -884,6 +965,11 @@ void readTOMLConf(toml::value &root)
         global.cacheSubscription = global.cacheConfig = global.cacheRuleset = 0;
     }
 
+    auto section_security = toml::find_or(root, "security", toml::value(toml::table()));
+    find_if_exist(section_security, "profile", global.securityProfile,
+                  "allow_public_upload", global.allowPublicUpload);
+    finalizeSecuritySettings();
+
     writeLog(0, "Load preference settings in TOML format completed.", LOG_LEVEL_INFO);
 }
 
@@ -993,6 +1079,14 @@ void readConf()
     ini.get_if_exist("proxy_ruleset", global.proxyRuleset);
     ini.get_if_exist("proxy_subscription", global.proxySubscription);
     ini.get_bool_if_exist("reload_conf_on_request", global.reloadConfOnRequest);
+
+    if(ini.section_exist("security"))
+    {
+        ini.enter_section("security");
+        ini.get_if_exist("profile", global.securityProfile);
+        ini.get_bool_if_exist("allow_public_upload", global.allowPublicUpload);
+    }
+    finalizeSecuritySettings();
 
     if(ini.section_exist("surge_external_proxy"))
     {
@@ -1342,7 +1436,7 @@ int loadExternalTOML(toml::value &root, ExternalConfig &ext)
     return 0;
 }
 
-int loadExternalConfig(std::string &path, ExternalConfig &ext)
+int loadExternalConfig(std::string &path, ExternalConfig &ext, FetchContext context)
 {
     std::string base_content, proxy = parseProxy(global.proxyConfig), config = fetchFile(path, proxy, global.cacheConfig);
     if(render_template(config, *ext.tpl_args, base_content, global.templatePath) != 0)

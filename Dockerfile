@@ -115,16 +115,16 @@ COPY . /src
 COPY --from=go-builder /build/bridge/mihomo_schemes.h /src/src/parser/mihomo_schemes.h
 COPY --from=go-builder /build/bridge/param_compat.h /src/src/parser/param_compat.h
 
-# Download latest header-only libraries
+# Download latest header-only libraries (non-fatal, local copies used as fallback)
 RUN set -xe && \
     echo "Downloading latest cpp-httplib..." && \
-    curl -fsSL https://raw.githubusercontent.com/yhirose/cpp-httplib/master/httplib.h -o include/httplib.h && \
+    curl -fsSL https://raw.githubusercontent.com/yhirose/cpp-httplib/master/httplib.h -o include/httplib.h || echo "WARN: httplib download failed, using local copy" && \
     echo "Downloading latest nlohmann/json..." && \
-    curl -fsSL https://github.com/nlohmann/json/releases/latest/download/json.hpp -o include/nlohmann/json.hpp && \
+    curl -fsSL https://github.com/nlohmann/json/releases/latest/download/json.hpp -o include/nlohmann/json.hpp || echo "WARN: json.hpp download failed, using local copy" && \
     echo "Downloading latest inja..." && \
-    curl -fsSL https://raw.githubusercontent.com/pantor/inja/master/single_include/inja/inja.hpp -o include/inja.hpp && \
+    curl -fsSL https://raw.githubusercontent.com/pantor/inja/master/single_include/inja/inja.hpp -o include/inja.hpp || echo "WARN: inja download failed, using local copy" && \
     echo "Downloading latest jpcre2..." && \
-    curl -fsSL https://raw.githubusercontent.com/jpcre2/jpcre2/master/src/jpcre2.hpp -o include/jpcre2.hpp && \
+    curl -fsSL https://raw.githubusercontent.com/jpcre2/jpcre2/master/src/jpcre2.hpp -o include/jpcre2.hpp || echo "WARN: jpcre2 download failed, using local copy" && \
     echo "Copying latest quickjspp from compiled source..." && \
     cp /usr/include/quickjspp.hpp include/quickjspp.hpp && \
     echo "All header libraries updated to latest versions"

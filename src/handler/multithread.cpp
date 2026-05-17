@@ -2,6 +2,7 @@
 #include <thread>
 #include <utility>
 
+#include "handler/fetch_context.h"
 #include "handler/settings.h"
 #include "utils/network.h"
 #include "webget.h"
@@ -66,20 +67,30 @@ void safe_set_times(RegexMatchConfigs data)
     global.timeNodeRules.swap(data);
 }
 
-std::shared_future<std::string> fetchFileAsync(const std::string &path, const std::string &proxy, int cache_ttl, bool find_local, bool async, const std::string &user_agent)
+std::shared_future<std::string> fetchFileAsync(const std::string &path, const std::string &proxy, int cache_ttl, bool find_local, bool async, const std::string &user_agent, FetchContext context)
 {
     // Helper lambda to call webGet with optional UA header
     auto do_webGet = [&](const std::string &url, const std::string &px, int ttl) -> std::string {
         if(user_agent.empty())
-            return webGet(url, px, ttl);
+            return webGet(url, px, ttl, nullptr, nullptr, context);
         string_icase_map headers;
         headers["User-Agent"] = user_agent;
         return webGet(url, px, ttl, nullptr, &headers);
     };
 
+    // Security check: block public requests from reading local files outside trusted paths
+    auto canReadLocal = [&](const std::string &p) -> bool {
+        if(!isPublicFetchRestricted(context))
+            return true;
+        if(isTrustedLocalResourcePath(p))
+            return true;
+        writeLog(0, "Blocked public request from reading local file: " + p, LOG_LEVEL_WARNING);
+        return false;
+    };
+
     if(!async)
     {
-        if(find_local && fileExist(path, true))
+        if(find_local && fileExist(path, true) && canReadLocal(path))
             return make_ready_future(fileGet(path, true));
         if(isLink(path))
             return make_ready_future(do_webGet(path, proxy, cache_ttl));
@@ -89,7 +100,7 @@ std::shared_future<std::string> fetchFileAsync(const std::string &path, const st
     std::shared_future<std::string> retVal;
     /*if(vfs::vfs_exist(path))
         retVal = std::async(std::launch::async, [path](){return vfs::vfs_get(path);});
-    else */if(find_local && fileExist(path, true))
+    else */if(find_local && fileExist(path, true) && canReadLocal(path))
         retVal = std::async(std::launch::async, [path](){return fileGet(path, true);});
     else if(isLink(path))
         retVal = std::async(std::launch::async, [path, proxy, cache_ttl, user_agent](){
@@ -104,7 +115,7 @@ std::shared_future<std::string> fetchFileAsync(const std::string &path, const st
     return retVal;
 }
 
-std::string fetchFile(const std::string &path, const std::string &proxy, int cache_ttl, bool find_local)
+std::string fetchFile(const std::string &path, const std::string &proxy, int cache_ttl, bool find_local, FetchContext context)
 {
-    return fetchFileAsync(path, proxy, cache_ttl, find_local, false).get();
+    return fetchFileAsync(path, proxy, cache_ttl, find_local, false, "", context).get();
 }

@@ -69,7 +69,6 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
   Proxy node;
   std::string strSub, extra_headers, custom_group;
   string_icase_map custom_headers;
-  long fetch_timeout = parse_set.fetch_timeout ? *parse_set.fetch_timeout : 0;
 
   // TODO: replace with startsWith if appropriate
   link = replaceAllDistinct(link, "\"", "");
@@ -313,7 +312,7 @@ int addNodes(std::string link, std::vector<Proxy> &allNodes, int groupID,
       // can detect missing User-Agent and fall back to built-in UA
 
       strSub = webGet(link, proxy, global.cacheSubscription, &extra_headers,
-                      &custom_headers, fetch_timeout);
+                      &custom_headers);
     }
     /*
     if(strSub.size() == 0)
