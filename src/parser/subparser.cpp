@@ -1,4 +1,4 @@
-﻿#include <string>
+#include <string>
 #include <map>
 
 #include "utils/base64/base64.h"
@@ -846,7 +846,7 @@ void explodeSocks(std::string link, Proxy &node) {
     socksConstruct(node, group, remarks, server, port, username, password);
 }
 
-void explodeHTTP(const std::string &link, Proxy &node) {
+void explodeHTTP(std::string link, Proxy &node) {
     std::string group, remarks, server, port, username, password;
     server = getUrlArg(link, "server");
     port = getUrlArg(link, "port");

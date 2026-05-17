@@ -1785,7 +1785,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS)
             writeLog(0, "Replaced existing global-ua line with &global-ua value: '" + argGlobalUA + "'", LOG_LEVEL_INFO);
         } else {
             std::string inject_line = ua_line + "\n";
-            if(output_content.find("---") == 0) {
+            if(startsWith(output_content, "---")) {
                 size_t first_nl = output_content.find('\n');
                 if(first_nl != std::string::npos)
                     output_content.insert(first_nl + 1, inject_line);

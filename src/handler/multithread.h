@@ -1,7 +1,7 @@
 #ifndef MULTITHREAD_H_INCLUDED
 #define MULTITHREAD_H_INCLUDED
 
-#include <mutex>
+#include <shared_mutex>
 #include <future>
 
 #include <yaml-cpp/yaml.h>
