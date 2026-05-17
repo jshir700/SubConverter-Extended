@@ -9,8 +9,8 @@
 #include "multithread.h"
 //#include "vfs.h"
 
-//safety lock for multi-thread (shared_mutex: concurrent reads allowed)
-std::shared_mutex on_emoji, on_rename, on_stream, on_time;
+//safety lock for multi-thread
+std::mutex on_emoji, on_rename, on_stream, on_time;
 
 static std::shared_future<std::string> make_ready_future(std::string value)
 {
@@ -21,49 +21,49 @@ static std::shared_future<std::string> make_ready_future(std::string value)
 
 RegexMatchConfigs safe_get_emojis()
 {
-    std::shared_lock lock(on_emoji);
+    guarded_mutex guard(on_emoji);
     return global.emojis;
 }
 
 RegexMatchConfigs safe_get_renames()
 {
-    std::shared_lock lock(on_rename);
+    guarded_mutex guard(on_rename);
     return global.renames;
 }
 
 RegexMatchConfigs safe_get_streams()
 {
-    std::shared_lock lock(on_stream);
+    guarded_mutex guard(on_stream);
     return global.streamNodeRules;
 }
 
 RegexMatchConfigs safe_get_times()
 {
-    std::shared_lock lock(on_time);
+    guarded_mutex guard(on_time);
     return global.timeNodeRules;
 }
 
 void safe_set_emojis(RegexMatchConfigs data)
 {
-    std::unique_lock lock(on_emoji);
+    guarded_mutex guard(on_emoji);
     global.emojis.swap(data);
 }
 
 void safe_set_renames(RegexMatchConfigs data)
 {
-    std::unique_lock lock(on_rename);
+    guarded_mutex guard(on_rename);
     global.renames.swap(data);
 }
 
 void safe_set_streams(RegexMatchConfigs data)
 {
-    std::unique_lock lock(on_stream);
+    guarded_mutex guard(on_stream);
     global.streamNodeRules.swap(data);
 }
 
 void safe_set_times(RegexMatchConfigs data)
 {
-    std::unique_lock lock(on_time);
+    guarded_mutex guard(on_time);
     global.timeNodeRules.swap(data);
 }
 

@@ -2,7 +2,6 @@
 #include <future>
 #include <iostream>
 #include <map>
-#include <shared_mutex>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <mutex>
@@ -59,8 +58,8 @@ struct GitHubFileRef
     std::string path;
 };
 
-static std::shared_mutex cache_fetch_mutex;
-static std::unordered_map<std::string, std::shared_future<CacheFetchResult>> cache_fetches;
+static std::mutex cache_fetch_mutex;
+static std::map<std::string, std::shared_future<CacheFetchResult>> cache_fetches;
 
 static CURLcode curl_init()
 {
@@ -789,7 +788,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
         std::shared_future<CacheFetchResult> fetch_future;
         bool owner = false;
         {
-            std::unique_lock cache_lock(cache_fetch_mutex);
+            std::lock_guard<std::mutex> lock(cache_fetch_mutex);
             auto iter = cache_fetches.find(url_md5);
             if(iter == cache_fetches.end())
             {
@@ -805,7 +804,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
             }
             else
                 fetch_future = iter->second;
-        } // cache_fetch_mutex released here (block scope)
+        }
 
         CacheFetchResult fetched = fetch_future.get();
         return_code = fetched.status_code;
@@ -845,7 +844,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
         }
         if(owner)
         {
-            std::unique_lock cache_erase_lock(cache_fetch_mutex);
+            std::lock_guard<std::mutex> lock(cache_fetch_mutex);
             cache_fetches.erase(url_md5);
         }
         return content;

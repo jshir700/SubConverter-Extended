@@ -1,5 +1,5 @@
 ﻿#include <atomic>
-#include <unordered_map>
+#include <map>
 #include <mutex>
 #include <string>
 #include <iostream>
@@ -45,7 +45,7 @@ std::string getTime(int type)
 static std::string get_thread_name()
 {
     static std::atomic_int counter = 0;
-    static std::unordered_map<std::thread::id, std::string> thread_names;
+    static std::map<std::thread::id, std::string> thread_names;
     static RWLock lock;
     std::thread::id id = std::this_thread::get_id();
     lock.readLock();
