@@ -9,9 +9,9 @@
 
 **A Modern Evolution of subconverter**
 
-![GitHub Tag](https://img.shields.io/github/v/tag/Aethersailor/SubConverter-Extended?style=flat&logo=github&label=version&color=blue)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/Aethersailor/SubConverter-Extended/build-dockerhub.yml?branch=master&style=flat&label=docker%20build&logo=GitHub%20Actions)
-[![Docker Pulls](https://img.shields.io/docker/pulls/aethersailor/subconverter-extended?style=flat&logo=docker)](https://hub.docker.com/r/aethersailor/subconverter-extended)
+![GitHub Tag](https://img.shields.io/github/v/tag/jshir700/SubConverter-Extended?style=for-the-badge&logo=github&label=version&color=blue)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/jshir700/SubConverter-Extended/build-dockerhub.yml?branch=master&style=for-the-badge&label=docker%20build&logo=GitHub%20Actions)
+[![Docker Pulls](https://img.shields.io/docker/pulls/jshir700/subconverter-extended?style=for-the-badge&logo=docker)](https://hub.docker.com/r/jshir700/subconverter-extended)
 [![License](https://img.shields.io/badge/license-GPL--3.0-orange?style=flat)](LICENSE)
 
 <h3>⚡ 现代化的订阅转换后端 | 深度适配 Mihomo 内核 ⚡</h3>

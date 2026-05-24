@@ -661,35 +661,65 @@ jobs:
 
           cat >> release-notes.md <<'EOF'
 
-          ## Docker Images / Docker 镜像
+          ---
 
-          Docker images are published to / 镜像发布至:
-          - `jshir700/subconverter-extended`
+          <div align="center">
 
-          Supported Docker platforms / 支持的 Docker 平台:
-          - `linux/amd64`
-          - `linux/arm64`
-          - `linux/arm/v7`
+          ![Version](https://img.shields.io/badge/version-${{ needs.prepare.outputs.version }}-blue?style=for-the-badge&logo=github)
+          ![Docker](https://img.shields.io/badge/docker-jshir700%2Fsubconverter--extended-2496ED?style=for-the-badge&logo=docker)
+          ![License](https://img.shields.io/badge/license-GPL--3.0-orange?style=for-the-badge)
+          ![Platform](https://img.shields.io/badge/platform-amd64%20|%20arm64%20|%20armv7-lightgrey?style=for-the-badge)
 
-          ## Downloads / 下载
+          </div>
 
-          ### Linux (portable, glibc runtime bundled) / Linux 便携版
-          - **amd64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz`
-          - **arm64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-arm64.tar.gz`
-          - **armv7**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-armv7.tar.gz`
+          ---
 
-          ### Windows (portable) / Windows 便携版
-          - **amd64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-windows-amd64.zip`
+          ## 🐳 Docker Images / Docker 镜像
 
-          ### OpenWrt 25.12+ APK (unsigned) / OpenWrt 25.12+ APK（未签名）
-          Install with / 安装命令: `apk add --allow-untrusted ./<package>.apk`. Choose the APK whose OpenWrt architecture suffix matches `apk print-arch` / 选择与 `apk print-arch` 输出匹配的 APK。
-          User configuration is created at / 首次启动时在 `/etc/subconverter/pref.toml` 创建用户配置，升级时不会被覆盖。
-          - **x86_64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-x86_64.apk`
-          - **aarch64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-aarch64_generic.apk`, `...-aarch64_cortex-a53.apk`, `...-aarch64_cortex-a72.apk`
-          - **armv7**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-arm_cortex-*.apk`
+          | Platform / 平台 | Arch | Image / 镜像 |
+          |:---|:---|:---|
+          | `linux/amd64` | x86_64 | `jshir700/subconverter-extended:${{ needs.prepare.outputs.version }}` |
+          | `linux/arm64` | aarch64 | `jshir700/subconverter-extended:${{ needs.prepare.outputs.version }}` |
+          | `linux/arm/v7` | armv7 | `jshir700/subconverter-extended:${{ needs.prepare.outputs.version }}` |
 
-          ### Checksums
-          - `SHA256SUMS`
+          > 🏷️ `latest` tag is also updated to this release / `latest` 标签同步更新至本版本
+
+          ## 📥 Downloads / 下载
+
+          ### 🐧 Linux (portable, glibc runtime bundled) / Linux 便携版
+
+          | Arch | File / 文件 |
+          |:---|:---|
+          | **amd64** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz` |
+          | **arm64** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-arm64.tar.gz` |
+          | **armv7** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-armv7.tar.gz` |
+
+          ### 🪟 Windows (portable) / Windows 便携版
+
+          | Arch | File / 文件 |
+          |:---|:---|
+          | **amd64** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-windows-amd64.zip` |
+
+          ### 🌐 OpenWrt 25.12+ APK (unsigned) / OpenWrt 25.12+ APK（未签名）
+
+          > 📦 Install / 安装: `apk add --allow-untrusted ./<package>.apk`
+          > ⚙️ Config / 配置: `/etc/subconverter/pref.toml` (created on first start, preserved across upgrades / 首次启动创建，升级保留)
+
+          | Arch / 架构 | OpenWrt Target | File / 文件 |
+          |:---|:---|:---|
+          | **x86_64** | `x86_64` | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-x86_64.apk` |
+          | **aarch64** | `aarch64_generic` | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-aarch64_generic.apk` |
+          | **aarch64** | `aarch64_cortex-a53` | `...-aarch64_cortex-a53.apk` |
+          | **aarch64** | `aarch64_cortex-a72` | `...-aarch64_cortex-a72.apk` |
+          | **armv7** | `arm_cortex-a5_vfpv4` | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-arm_cortex-a5_vfpv4.apk` |
+          | **armv7** | `arm_cortex-a7 / a8 / a9 / a15` | `...-arm_cortex-a*.apk` |
+
+          ### 🔐 Checksums / 校验和
+
+          | File / 文件 | SHA256 |
+          |:---|:---|
+          | `SHA256SUMS` | See attached / 见附件 |
+
           EOF
 
       - name: Download all artifacts
