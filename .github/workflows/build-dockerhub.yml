@@ -42,6 +42,7 @@ jobs:
       tags: ${{ steps.meta.outputs.tags }}
       build_date: ${{ steps.build_date.outputs.build_date }}
       linux_matrix: ${{ steps.linux_matrix.outputs.matrix }}
+      docker_changed: ${{ steps.final_docker_changes.outputs.changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -66,10 +67,6 @@ jobs:
           else
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Skip if no Docker-relevant changes
-        if: steps.check_docker_changes.outputs.changed == 'false'
-        run: echo "No Docker-relevant changes, skipping build" && exit 0
 
       - name: Get short SHA
         id: vars
@@ -127,6 +124,20 @@ jobs:
             echo "apk_built=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Finalize Docker-relevant changes
+        id: final_docker_changes
+        if: github.event_name == 'workflow_run'
+        run: |
+          # Always build for tag pushes. Otherwise, only build when
+          # Docker-relevant files changed.
+          if [[ "${{ steps.version.outputs.is_tag }}" == "true" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Tag push, forcing Docker build"
+          else
+            echo "changed=${{ steps.check_docker_changes.outputs.changed }}" >> $GITHUB_OUTPUT
+            echo "Docker-relevant changes: ${{ steps.check_docker_changes.outputs.changed }}"
+          fi
+
       - name: Set build date
         id: build_date
         run: echo "build_date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
@@ -168,6 +179,7 @@ jobs:
     name: "🐳 Docker Build (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
     needs: prepare
+    if: needs.prepare.outputs.docker_changed != 'false'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.linux_matrix) }}
@@ -350,7 +362,7 @@ jobs:
     name: "🪟 Windows Build (amd64)"
     runs-on: windows-latest
     needs: prepare
-    if: needs.prepare.outputs.is_release == 'true'
+    if: needs.prepare.outputs.is_release == 'true' && needs.prepare.outputs.docker_changed != 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
