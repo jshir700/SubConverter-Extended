@@ -13,7 +13,6 @@ struct ParamCompatInfo {
     bool hardcoded;  // true if Mihomo hardcodes this parameter
 };
 
-// Lazy-initialized to avoid stack overflow during static initialization
 inline const std::map<std::string, std::map<std::string, ParamCompatInfo>>& getParamCompat() {
     static const std::map<std::string, std::map<std::string, ParamCompatInfo>> data = {
     // Protocol: anytls
