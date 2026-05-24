@@ -112,7 +112,6 @@ COPY --from=go-builder /build/bridge/go.sum /src/bridge/go.sum
 
 # build SubConverter-Extended from THIS repository source
 WORKDIR /src
-ARG CACHE_BUST=0
 COPY . /src
 COPY --from=go-builder /build/bridge/mihomo_schemes.h /src/src/parser/mihomo_schemes.h
 COPY --from=go-builder /build/bridge/param_compat.h /src/src/parser/param_compat.h
@@ -148,12 +147,8 @@ RUN set -xe && \
     mkdir -p bridge && \
     cp /usr/lib/libmihomo.so bridge/ && \
     cp /usr/include/libmihomo.h bridge/ && \
-    export PATH="/usr/lib/ccache:$PATH" && \
-    export CCACHE_DIR=/tmp/ccache && \
-    export CCACHE_COMPILERCHECK=content && \
     cmake -GNinja \
     -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
     -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
     -DCMAKE_POSITION_INDEPENDENT_CODE=OFF \
     . && \
@@ -191,8 +186,8 @@ RUN set -xe && \
     fi
 
 # ========== FINAL STAGE ==========
-# Alpine 运行时 + 搬运 glibc 依赖（不固定版本）
-FROM mirror.gcr.io/library/alpine:latest
+# Debian (glibc) 运行时
+FROM mirror.gcr.io/library/debian:latest
 
 ARG VERSION="dev"
 ARG SHA=""
@@ -208,35 +203,24 @@ LABEL \
   org.opencontainers.image.created="${BUILD_DATE}" \
   maintainer="Aethersailor"
 
-RUN apk add --no-cache ca-certificates
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libcurl4 libpcre2-8-0 libyaml-cpp0.8 \
+    libssl3 libstdc++6 && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /src/subconverter /usr/bin/subconverter
 COPY --from=builder /src/base /base/
 COPY --from=builder /usr/lib/libmihomo.so /usr/lib/
-COPY --from=builder /runtime-libs/ /
-COPY --from=builder /etc/nsswitch.conf /etc/nsswitch.conf
-
-# 确保二进制和库可执行
-RUN chmod +x /usr/bin/subconverter && chmod +x /usr/lib/libmihomo.so
 
 ENV TZ=Asia/Shanghai
-ENV LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/lib64:/usr/lib"
 RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /base
-RUN set -e && \
-    printf '%s\n' \
+RUN printf '%s\n' \
       '#!/bin/sh' \
       'set -e' \
-      'ARCH="$(uname -m)"' \
-      'case "$ARCH" in' \
-      '  x86_64) LIB_ARCH="x86_64-linux-gnu" ;;' \
-      '  aarch64|arm64) LIB_ARCH="aarch64-linux-gnu" ;;' \
-      '  *) LIB_ARCH="" ;;' \
-      'esac' \
-      'if [ -n "$LIB_ARCH" ]; then' \
-      '  export LD_LIBRARY_PATH="/lib/${LIB_ARCH}:/usr/lib/${LIB_ARCH}:/lib64:/usr/lib"' \
-      'fi' \
       'CONF="${PREF_PATH:-/base/pref.toml}"' \
       'CONF_DIR="$(dirname "$CONF")"' \
       'mkdir -p "$CONF_DIR"' \

@@ -1,4 +1,7 @@
 #include "mihomo_bridge.h"
+
+#ifdef USE_MIHOMO_PARSER
+
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <stdexcept>
@@ -121,3 +124,5 @@ bool isMihomoParserAvailable() {
 }
 
 } // namespace mihomo
+
+#endif // USE_MIHOMO_PARSER

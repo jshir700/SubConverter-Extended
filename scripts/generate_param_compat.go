@@ -800,8 +800,11 @@ func generateCppHeader(compatMap map[string]*ProtocolCompat, outputPath string) 
 	sb.WriteString("    bool hardcoded;  // true if Mihomo hardcodes this parameter\n")
 	sb.WriteString("};\n\n")
 
-	// PARAM_COMPAT map
-	sb.WriteString("const std::map<std::string, std::map<std::string, ParamCompatInfo>> PARAM_COMPAT = {\n")
+	// PARAM_COMPAT — lazy-initialized via Meyer's singleton to avoid
+	// stack overflow during C++ static initialization (the map is ~17 KB
+	// of nested initializer lists that can exhaust the init stack).
+	sb.WriteString("inline const std::map<std::string, std::map<std::string, ParamCompatInfo>>& getParamCompat() {\n")
+	sb.WriteString("    static const std::map<std::string, std::map<std::string, ParamCompatInfo>> data = {\n")
 
 	for _, proto := range getSortedProtocols(compatMap) {
 		compat := compatMap[proto]
@@ -825,13 +828,16 @@ func generateCppHeader(compatMap map[string]*ProtocolCompat, outputPath string) 
 		sb.WriteString("    }},\n")
 	}
 
-	sb.WriteString("};\n\n")
+	sb.WriteString("    };\n")
+	sb.WriteString("    return data;\n")
+	sb.WriteString("}\n\n")
 
-	// Helper function
+	// Helper functions — use getParamCompat() for lazy init
 	sb.WriteString("// Check if a protocol supports a specific parameter\n")
 	sb.WriteString("inline bool isParamSupported(const std::string& protocol, const std::string& param) {\n")
-	sb.WriteString("    auto proto_it = PARAM_COMPAT.find(protocol);\n")
-	sb.WriteString("    if (proto_it == PARAM_COMPAT.end()) return false;\n")
+	sb.WriteString("    const auto& compat = getParamCompat();\n")
+	sb.WriteString("    auto proto_it = compat.find(protocol);\n")
+	sb.WriteString("    if (proto_it == compat.end()) return false;\n")
 	sb.WriteString("    auto param_it = proto_it->second.find(param);\n")
 	sb.WriteString("    return param_it != proto_it->second.end() && param_it->second.supported;\n")
 	sb.WriteString("}\n\n")
@@ -839,8 +845,9 @@ func generateCppHeader(compatMap map[string]*ProtocolCompat, outputPath string) 
 	sb.WriteString("// Check if a parameter is hardcoded by Mihomo for this protocol\n")
 	sb.WriteString("// Hardcoded parameters should NOT be overridden by global settings\n")
 	sb.WriteString("inline bool isParamHardcoded(const std::string& protocol, const std::string& param) {\n")
-	sb.WriteString("    auto proto_it = PARAM_COMPAT.find(protocol);\n")
-	sb.WriteString("    if (proto_it == PARAM_COMPAT.end()) return false;\n")
+	sb.WriteString("    const auto& compat = getParamCompat();\n")
+	sb.WriteString("    auto proto_it = compat.find(protocol);\n")
+	sb.WriteString("    if (proto_it == compat.end()) return false;\n")
 	sb.WriteString("    auto param_it = proto_it->second.find(param);\n")
 	sb.WriteString("    return param_it != proto_it->second.end() && param_it->second.hardcoded;\n")
 	sb.WriteString("}\n\n")

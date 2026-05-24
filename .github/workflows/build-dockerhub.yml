@@ -592,8 +592,9 @@ jobs:
             echo "## 中文"
             echo
             echo "### 变更"
-            echo "本次发布包含以下提交："
             if [ -s commits.md ]; then
+              echo "本次发布包含以下提交（提交信息为中英双语）："
+              echo
               cat commits.md
             else
               echo "- 未获取到提交摘要。"
@@ -631,6 +632,8 @@ jobs:
           Use only the release context provided below. Do not invent features, fixes, platforms, or compatibility claims.
           Summarize user-visible changes first. Mention maintenance or dependency changes only when relevant.
           Ignore auto-generated files unless the context shows they affect users.
+
+          Commit messages are bilingual (Chinese + English), so use them as-is when referencing specific changes.
 
           Return only Markdown. Do not wrap the answer in a code fence.
           Do not include a downloads section; it will be appended by the workflow.
@@ -682,10 +685,7 @@ jobs:
 
           <div align="center">
 
-          ![Version](https://img.shields.io/badge/version-${{ needs.prepare.outputs.version }}-blue?style=for-the-badge&logo=github)
-          ![Docker](https://img.shields.io/badge/docker-jshir700%2Fsubconverter--extended-2496ED?style=for-the-badge&logo=docker)
-          ![License](https://img.shields.io/badge/license-GPL--3.0-orange?style=for-the-badge)
-          ![Platform](https://img.shields.io/badge/platform-amd64%20|%20arm64%20|%20armv7-lightgrey?style=for-the-badge)
+          <img alt="Version" src="https://img.shields.io/badge/version-${{ needs.prepare.outputs.version }}-blue?style=for-the-badge&logo=github">&nbsp;<img alt="Docker" src="https://img.shields.io/badge/docker-jshir700%2Fsubconverter--extended-2496ED?style=for-the-badge&logo=docker">&nbsp;<img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-orange?style=for-the-badge">&nbsp;<img alt="Platform" src="https://img.shields.io/badge/platform-amd64%20|%20arm64%20|%20armv7-lightgrey?style=for-the-badge">
 
           </div>
 
