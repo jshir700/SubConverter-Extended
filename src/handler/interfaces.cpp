@@ -851,7 +851,9 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     storeCachedSubResponse(key, result);
     call->cv.notify_all();
     return body;
-  } catch (...) {
+  } catch (const std::exception &e) {
+    writeLog(LOG_TYPE_ERROR, "[SUB-EXCEPTION] " + std::string(e.what()),
+             LOG_LEVEL_ERROR);
     {
       std::lock_guard<std::mutex> lock(call->mutex);
       call->exception = std::current_exception();
@@ -862,7 +864,24 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
       g_sub_inflight.erase(key);
     }
     call->cv.notify_all();
-    throw;
+    response.status_code = 500;
+    return "Internal server error while processing subscription.\n"
+           "处理订阅时发生内部服务器错误。\n";
+  } catch (...) {
+    writeLog(LOG_TYPE_ERROR, "[SUB-EXCEPTION] 未知异常类型 (not std::exception)", LOG_LEVEL_ERROR);
+    {
+      std::lock_guard<std::mutex> lock(call->mutex);
+      call->exception = std::current_exception();
+      call->done = true;
+    }
+    {
+      std::lock_guard<std::mutex> lock(g_sub_inflight_mutex);
+      g_sub_inflight.erase(key);
+    }
+    call->cv.notify_all();
+    response.status_code = 500;
+    return "Internal server error while processing subscription.\n"
+           "处理订阅时发生内部服务器错误。\n";
   }
 }
 
