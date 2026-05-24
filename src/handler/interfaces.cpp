@@ -960,18 +960,40 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   // &global-ua= overrides the config file's user_agent setting
   if(!argGlobalUA.empty())
       global.user_agent = argGlobalUA;
-  // If no &ua= URL parameter, fall back to global-ua from config file
-  if(argUserAgent.empty() && !global.user_agent.empty())
+
+  // Read proxys-provider and proxys-ua early for UA priority assembly
+  std::string argProxysProvider_early = getUrlArg(argument, "proxys-provider");
+  std::string argProxysUA_early = getUrlArg(argument, "proxys-ua");
+
+  // Assemble server-side download UA with priority:
+  //   per-URL |ua > &proxys-ua= > &ua= > &global-ua= > clash.meta
+  // When proxys-provider is NOT false (true or absent), the subscription URLs
+  // go through proxy-provider mode, so argUserAgent is only used for node links
+  // and config downloads — no need for proxys-ua or clash.meta fallback.
+  if (argProxysProvider_early == "false") {
+    if (!argProxysUA_early.empty())
+      argUserAgent = argProxysUA_early;
+    else if (argUserAgent.empty() && !global.user_agent.empty())
       argUserAgent = global.user_agent;
+    if (argUserAgent.empty())
+      argUserAgent = "clash.meta";
+  } else {
+    if (argUserAgent.empty() && !global.user_agent.empty())
+      argUserAgent = global.user_agent;
+  }
+
   // Global parameters for subscription/ruleset provider/UA/proxy/interval behavior
-  std::string argProxysProvider = getUrlArg(argument, "proxys-provider"),
+  std::string argProxysProvider = argProxysProvider_early,
               argRulesProvider = getUrlArg(argument, "rules-provider"),
-              argProxysUA = getUrlArg(argument, "proxys-ua"),
+              argProxysUA = argProxysUA_early,
               argRulesUA = getUrlArg(argument, "rules-ua"),
               argProxysProxy = getUrlArg(argument, "proxys-proxy"),
               argRulesProxy = getUrlArg(argument, "rules-proxy"),
               argProxysInterval = getUrlArg(argument, "proxys-interval"),
               argRulesInterval = getUrlArg(argument, "rules-interval");
+
+  if (argRulesInterval.empty())
+    argRulesInterval = "43200";
 
   /// switches with default value
   tribool argUpload = getUrlArg(argument, "upload"),
@@ -1376,7 +1398,10 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
 
   if (!global.insertUrls.empty() && argEnableInsert) {
     groupID = -1;
-    urls = split(global.insertUrls, "|");
+    urls = split(global.insertUrls, "||");
+    if (urls.size() <= 1 && !global.insertUrls.empty()) {
+      urls = split(global.insertUrls, "|");
+    }
     importItems(urls, true);
     for (std::string &x : urls) {
       x = regTrim(x);
@@ -1401,7 +1426,11 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
       groupID--;
     }
   }
-  urls = split(argUrl, "|");
+  // Split by || first (new separator), fall back to | for upstream compatibility
+  urls = split(argUrl, "||");
+  if (urls.size() <= 1) {
+    urls = split(argUrl, "|");
+  }
   // Re-merge inline param segments (key:val;key:val) with their parent URLs.
   // Inline params may contain :// in values (e.g. proxy:http://proxy:8080)
   // so we detect them by checking for known keys or ; separators.
@@ -1537,11 +1566,10 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
       }
     }
 
-    // 只有当有订阅链接时才启用 proxy-provider 模式
-    if (!subscription_urls.empty()) {
-      writeLog(0, "检测到订阅 URL，启用 proxy-provider 模式。",
-               LOG_LEVEL_INFO);
-      ext.use_proxy_provider = true;
+    // Process subscription URLs: per-URL |provider overrides global proxys-provider
+    // Each URL is independently evaluated for provider vs server-side fetch
+    {
+      bool has_any_provider = false;
       std::unordered_set<std::string> provider_names;
       auto reserve_provider_name = [&](const std::string &base) {
         std::string base_name =
@@ -1568,99 +1596,138 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
         }
       };
 
-      // 为订阅链接创建 proxy-provider
       for (const SubscriptionLinkItem &item : subscription_urls) {
-        ProxyProvider provider;
-        // 使用 URL 的 MD5 哈希前 10 位作为唯一特征码
-        // 这样相同的订阅链接会生成相同的 provider 名称
-        // 不同的订阅链接会生成不同的名称，触发客户端自动更新
-        std::string urlHash =
-            item.url_decoded ? generateProviderHashFromDecodedUrl(item.url)
-                             : generateProviderHash(item.url);
-        std::string default_name = "Provider_" + urlHash;
-        std::string sanitized_provider = sanitizeProviderName(item.provider);
-        std::string base_name =
-            sanitized_provider.empty() ? default_name : sanitized_provider;
-        base_name = sanitizeProviderName(base_name);
-        if (base_name.empty())
-          base_name = default_name;
-        provider.name = reserve_provider_name(base_name);
-        provider.tag = item.tag;
-        writeLog(0,
-                 "已生成 provider：" + provider.name + "，URL：" +
-                     item.url,
-                 LOG_LEVEL_INFO);
-        provider.url = item.url_decoded ? item.url
-                                        : urlDecode(item.url); // 解码 URL
+        // Determine provider mode for this URL:
+        // per-URL |provider > &proxys-provider= > default (true for subscription URLs)
+        bool url_provider_mode;
+        if (item.provider_explicit)
+          url_provider_mode = item.provider_mode;
+        else if (!argProxysProvider.empty())
+          url_provider_mode = (argProxysProvider != "false");
+        else
+          url_provider_mode = true;
 
-        // Interval priority: per-URL (|interval:X) > &proxys-interval= > default 3600
-        int per_url_interval_int = to_int(item.interval, -1);
-        int global_proxys_interval = to_int(argProxysInterval, -1);
-        if (item.interval_explicit && per_url_interval_int > 0) {
-          provider.interval = per_url_interval_int;
+        if (url_provider_mode) {
+          // ====== PROVIDER MODE ======
+          has_any_provider = true;
+          ProxyProvider provider;
+          std::string urlHash =
+              item.url_decoded ? generateProviderHashFromDecodedUrl(item.url)
+                               : generateProviderHash(item.url);
+          std::string default_name = "Provider_" + urlHash;
+          std::string sanitized_provider = sanitizeProviderName(item.provider);
+          std::string base_name =
+              sanitized_provider.empty() ? default_name : sanitized_provider;
+          base_name = sanitizeProviderName(base_name);
+          if (base_name.empty())
+            base_name = default_name;
+          provider.name = reserve_provider_name(base_name);
+          provider.tag = item.tag;
           writeLog(0,
-                   "  -> 使用每 URL 间隔设置 provider '" + provider.name +
-                       "': '" + item.interval + "'",
+                   "已生成 provider：" + provider.name + "，URL：" + item.url,
                    LOG_LEVEL_INFO);
-        } else if (!argProxysInterval.empty() && global_proxys_interval > 0) {
-          provider.interval = global_proxys_interval;
-          writeLog(0,
-                   "  -> 使用全局 &proxys-interval 设置 provider '" +
-                       provider.name + "': '" + argProxysInterval + "'",
-                   LOG_LEVEL_INFO);
+          provider.url = item.url_decoded ? item.url
+                                          : urlDecode(item.url);
+
+          // Interval: per-URL |interval > &proxys-interval= > 43200
+          int per_url_interval_int = to_int(item.interval, -1);
+          int global_proxys_interval = to_int(argProxysInterval, -1);
+          if (item.interval_explicit && per_url_interval_int > 0) {
+            provider.interval = per_url_interval_int;
+            writeLog(0,
+                     "  -> 使用每 URL 间隔设置 provider '" + provider.name +
+                         "': '" + item.interval + "'",
+                     LOG_LEVEL_INFO);
+          } else if (!argProxysInterval.empty() && global_proxys_interval > 0) {
+            provider.interval = global_proxys_interval;
+            writeLog(0,
+                     "  -> 使用全局 &proxys-interval 设置 provider '" +
+                         provider.name + "': '" + argProxysInterval + "'",
+                     LOG_LEVEL_INFO);
+          } else {
+            provider.interval = 43200;
+          }
+
+          // UA: per-URL |ua > &proxys-ua=
+          if (!item.ua.empty()) {
+            provider.user_agent = item.ua;
+            writeLog(0,
+                     "  -> 使用每 URL UA 设置 provider '" + provider.name +
+                         "': '" + item.ua + "'",
+                     LOG_LEVEL_INFO);
+          } else if (!argProxysUA.empty()) {
+            provider.user_agent = argProxysUA;
+            writeLog(0,
+                     "  -> 使用全局 &proxys-ua 设置 provider '" +
+                         provider.name + "': '" + argProxysUA + "'",
+                     LOG_LEVEL_INFO);
+          }
+
+          // Proxy: per-URL |proxy > &proxys-proxy=
+          if (!item.proxy.empty()) {
+            provider.proxy = item.proxy;
+            writeLog(0,
+                     "  -> 使用每 URL 代理设置 provider '" + provider.name +
+                         "': '" + item.proxy + "'",
+                     LOG_LEVEL_INFO);
+          } else if (!argProxysProxy.empty()) {
+            provider.proxy = argProxysProxy;
+            writeLog(0,
+                     "  -> 使用全局 &proxys-proxy 设置 provider '" +
+                         provider.name + "': '" + argProxysProxy + "'",
+                     LOG_LEVEL_INFO);
+          }
+
+          provider.groupId = groupID;
+          provider.path = "./providers/" + provider.name + ".yaml";
+
+          if (!argIncludeRemark.empty() && regValid(argIncludeRemark))
+            provider.filter = argIncludeRemark;
+          if (!argExcludeRemark.empty() && regValid(argExcludeRemark))
+            provider.exclude_filter = argExcludeRemark;
+
+          ext.providers.push_back(provider);
+          groupID++;
         } else {
-          provider.interval = 3600;
-        }
+          // ====== SERVER-SIDE FETCH ======
+          // Apply per-URL UA/proxy to parse_set for this addNodes call
+          auto orig_ua = parse_set.custom_user_agent;
+          auto orig_proxy = parse_set.proxy;
+          std::string effective_ua, effective_proxy;
 
-        // UA priority: per-URL (|ua:X) > &proxys-ua= > empty
-        if (!item.ua.empty()) {
-          provider.user_agent = item.ua;
-          writeLog(0,
-                   "  -> 使用每 URL UA 设置 provider '" + provider.name +
-                       "': '" + item.ua + "'",
-                   LOG_LEVEL_INFO);
-        } else if (!argProxysUA.empty()) {
-          provider.user_agent = argProxysUA;
-          writeLog(0,
-                   "  -> 使用全局 &proxys-ua 设置 provider '" + provider.name +
-                       "': '" + argProxysUA + "'",
-                   LOG_LEVEL_INFO);
-        }
+          if (!item.ua.empty()) {
+            effective_ua = item.ua;
+            parse_set.custom_user_agent = &effective_ua;
+            writeLog(0, "  -> 每 URL UA: '" + item.ua + "'", LOG_LEVEL_INFO);
+          }
+          if (!item.proxy.empty()) {
+            effective_proxy = item.proxy;
+            parse_set.proxy = &effective_proxy;
+            writeLog(0, "  -> 每 URL 代理: '" + item.proxy + "'", LOG_LEVEL_INFO);
+          }
 
-        // Proxy priority: per-URL (|proxy:X) > &proxys-proxy= > global
-        if (!item.proxy.empty()) {
-          provider.proxy = item.proxy;
-          writeLog(0,
-                   "  -> 使用每 URL 代理设置 provider '" + provider.name +
-                       "': '" + item.proxy + "'",
-                   LOG_LEVEL_INFO);
-        } else if (!argProxysProxy.empty()) {
-          provider.proxy = argProxysProxy;
-          writeLog(0,
-                   "  -> 使用全局 &proxys-proxy 设置 provider '" +
-                       provider.name + "': '" + argProxysProxy + "'",
-                   LOG_LEVEL_INFO);
-        }
+          std::string node_link = item.url;
+          if (!item.tag.empty())
+            node_link = "tag:" + item.tag + "," + node_link;
 
-        provider.groupId = groupID;
-        provider.path = "./providers/" + provider.name + ".yaml";
+          writeLog(0, "正在从 URL 获取节点数据：'" + node_link + "'。", LOG_LEVEL_INFO);
+          if (addNodes(node_link, nodes, groupID, parse_set) == -1) {
+            writeLog(0,
+                     "已跳过无效节点链接：'" + node_link + "'，继续处理其他节点。",
+                     LOG_LEVEL_WARNING);
+          }
+          groupID++;
 
-        // 将 include/exclude 参数转换为 filter
-        if (!argIncludeRemark.empty() && regValid(argIncludeRemark)) {
-          provider.filter = argIncludeRemark;
+          parse_set.custom_user_agent = orig_ua;
+          parse_set.proxy = orig_proxy;
         }
-        if (!argExcludeRemark.empty() && regValid(argExcludeRemark)) {
-          provider.exclude_filter = argExcludeRemark;
-        }
-
-        ext.providers.push_back(provider);
-        groupID++;
       }
-    } else {
-      // 没有订阅链接，禁用 proxy-provider 模式
-      writeLog(0, "未检测到订阅 URL，禁用 proxy-provider 模式。",
-               LOG_LEVEL_INFO);
-      ext.use_proxy_provider = false;
+
+      ext.use_proxy_provider = has_any_provider;
+      if (has_any_provider)
+        writeLog(0, "检测到订阅 URL，启用 proxy-provider 模式。", LOG_LEVEL_INFO);
+      if (!subscription_urls.empty() && !has_any_provider)
+        writeLog(0, "未检测到订阅 URL，禁用 proxy-provider 模式。", LOG_LEVEL_INFO);
     }
 
     // 节点链接使用原有逻辑直接解析
@@ -2422,7 +2489,7 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS) {
       }
       url = ini.get("Profile", "url");
       if (!url.empty()) {
-        all_urls += "|" + url;
+        all_urls += "||" + url;
         writeLog(0, "已添加来自配置档 '" + name + "' 的 URL。", LOG_LEVEL_INFO);
       } else {
         writeLog(0, "配置档 '" + name + "' 没有 url 字段，跳过。",
