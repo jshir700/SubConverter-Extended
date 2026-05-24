@@ -30,16 +30,16 @@ jobs:
           script: |
             const message = `
             🚫 **自动拦截提示 (Auto-Block)** 🚫
-            
+
             感谢你的提交！(Thanks for your contribution!)
-            
-            本项目严格使用双分支开发模型：
-            - \`master\` 分支仅用于最终发布。
-            - **所有的代码贡献和 PR 必须指向 \`dev\` 分支。**
-            
-            这个 PR 已经被自动关闭。请将你本地的分支目标修改为 \`dev\` 后再重新提交一个 PR。非常感谢你的理解与支持！
-            
-            (Please change the target branch of your PR to \`dev\` and resubmit. The \`master\` branch is for releases only.)
+
+            \`master\` 分支仅用于最终发布，不接受外部 PR。
+            如有建议或修复，请先提交 Issue 讨论后再由维护者操作。
+
+            这个 PR 已经被自动关闭。感谢你的理解与支持！
+
+            (The \`master\` branch is for releases only and does not accept external PRs.
+            Please open an Issue to discuss your contribution first.)
             `;
             
             // 评论
