@@ -1128,6 +1128,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   ext.clash_new_field_name = argClashNewField.get(global.clashUseNewField);
   ext.clash_script = argGenClashScript.get();
   ext.provider_proxy_direct = argProviderProxyDirect.get(true);
+  ext.dedup = argDedup.get(true);
   // 无论 expand 取何值，均强制使用 Mihomo 新字段名（proxy-groups / rules）
   // 避免因全局配置为旧字段名而导致 Mihomo 无法识别
   ext.clash_new_field_name = true;

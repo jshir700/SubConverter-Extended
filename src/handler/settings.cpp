@@ -389,7 +389,7 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
     if (x.provider_explicit) {
       // Rule already has ,provider=, use as-is
     } else if (!rules_provider.empty()) {
-      rule_url += "," + rules_provider;
+      x.Provider = (rules_provider == "false");
       x.provider_override = true;
     }
 

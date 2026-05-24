@@ -474,8 +474,10 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         }
         else
         {
+            bool ruleset_inline_expand = false;
             if(x.rule_type == RULESET_CLASH_IPCIDR || x.rule_type == RULESET_CLASH_DOMAIN || x.rule_type == RULESET_CLASH_CLASSICAL)
             {
+                if(x.provider) {
                 //rule_name = std::to_string(hash_(rule_group + rule_path));
                 rule_name = old_rule_name = urlDecode(findFileName(rule_path));
                 int idx = 2;
@@ -501,9 +503,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 groups.emplace_back(rule_name);
                 groupsSet.emplace(rule_name);
                 continue;
+                }
+                // provider disabled for this ruleset: fall through to inline expansion
+                ruleset_inline_expand = true;
             }
-            bool ruleset_inline_expand = false;
-            if(!remote_path_prefix.empty())
+            else if(!remote_path_prefix.empty())
             {
                 if(fileExist(rule_path, true) || isLink(rule_path))
                 {
@@ -567,13 +571,23 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         ruleset_proxy.erase(rule_name);
                         ruleset_inline_expand = true;
                     }
-                    else
+                    else if(x.provider)
                     {
                         if(!script)
                             rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                         groups.emplace_back(rule_name);
                         groupsSet.emplace(rule_name);
                         continue;
+                    }
+                    else
+                    {
+                        urls.erase(rule_name);
+                        names.erase(rule_name);
+                        rule_type.erase(rule_name);
+                        ruleset_interval.erase(rule_name);
+                        ruleset_user_agent.erase(rule_name);
+                        ruleset_proxy.erase(rule_name);
+                        ruleset_inline_expand = true;
                     }
                 }
                 else
