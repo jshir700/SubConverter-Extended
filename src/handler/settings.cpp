@@ -197,8 +197,14 @@ int importItems(string_array &target, bool scope_limit, FetchContext context) {
 }
 
 toml::value parseToml(const std::string &content, const std::string &fname) {
-  std::istringstream is(content);
-  return toml::parse(is, fname);
+  try {
+    std::istringstream is(content);
+    return toml::parse(is, fname);
+  } catch (toml::exception &e) {
+    writeLog(0, "TOML parse failed for '" + fname + "': " + std::string(e.what()),
+             LOG_LEVEL_DEBUG);
+    return toml::value();
+  }
 }
 
 void importItems(std::vector<toml::value> &root, const std::string &import_key,
@@ -446,7 +452,9 @@ void readYAMLConf(YAML::Node &node) {
   std::string strLine;
   string_array tempArray;
 
-  // api_mode and api_access_token removed - hardcoded in settings.h
+  // api_mode and api_access_token read from YAML common section
+  if (section["api_access_token"].IsDefined())
+    global.accessToken = section["api_access_token"].as<std::string>();
   if (section["default_url"].IsSequence()) {
     section["default_url"] >> tempArray;
     if (tempArray.size()) {
@@ -750,7 +758,8 @@ void readTOMLConf(toml::value &root) {
   global.insertUrls = join(insert_url, "|");
 
   bool filter = false;
-  // api_mode and api_access_token removed - hardcoded in settings.h
+  // api_mode and api_access_token read from YAML common section
+  find_if_exist(section_common, "api_access_token", global.accessToken);
   find_if_exist(
       section_common, "exclude_remarks", global.excludeRemarks,
       "include_remarks", global.includeRemarks, "enable_insert",
@@ -976,7 +985,7 @@ void readConf() {
   string_array tempArray;
 
   ini.enter_section("common");
-  // api_mode and api_access_token removed - hardcoded in settings.h
+  ini.get_if_exist("api_access_token", global.accessToken);
   ini.get_if_exist("default_url", global.defaultUrls);
   global.enableInsert = ini.get("enable_insert");
   ini.get_if_exist("insert_url", global.insertUrls);
