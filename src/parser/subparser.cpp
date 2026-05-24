@@ -464,7 +464,6 @@ void explodeVmessConf(std::string content, std::vector<Proxy> &nodes) {
         //writeLog(0, "VMessConf parser throws an error. Leaving...", LOG_LEVEL_WARNING);
         //return;
         //ignore
-        throw;
     }
     //read all subscribe remark as group name
     for (uint32_t i = 0; i < json["subItem"].Size(); i++)
@@ -3295,7 +3294,7 @@ void explodeSub(const std::string &sub_in, std::vector<Proxy> &nodes) {
     } catch (std::exception &e) {
         //writeLog(0, e.what(), LOG_LEVEL_DEBUG);
         //ignore
-        throw;
+
     }
     try {
         std::string pattern = "\"?(inbounds)\"?:";
@@ -3321,7 +3320,7 @@ void explodeSub(const std::string &sub_in, std::vector<Proxy> &nodes) {
         writeLog(LOG_TYPE_ERROR, e.what(), LOG_LEVEL_ERROR);
         //writeLog(0, e.what(), LOG_LEVEL_DEBUG);
         //ignore
-        throw;
+
     }
     //try to parse as surge configuration
     if (!processed && explodeSurge(sub, nodes)) {
