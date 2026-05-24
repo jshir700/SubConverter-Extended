@@ -80,7 +80,7 @@ static bool canReadLocalFetchPath(const std::string &path,
 
 std::shared_future<std::string> fetchFileAsync(const std::string &path, const std::string &proxy, int cache_ttl, bool find_local, bool async, const std::string &user_agent, FetchContext context)
 {
-    auto do_webGet = [&](const std::string &url, const std::string &px, int ttl) -> std::string {
+    auto do_webGet = [&, user_agent, context](const std::string &url, const std::string &px, int ttl) -> std::string {
         if(user_agent.empty())
             return webGet(url, px, ttl, nullptr, nullptr, context);
         string_icase_map headers;

@@ -852,7 +852,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     call->cv.notify_all();
     return body;
   } catch (const std::exception &e) {
-    writeLog(LOG_TYPE_ERROR, "[SUB-EXCEPTION] " + std::string(e.what()),
+    writeLog(LOG_TYPE_ERROR, std::string(e.what()),
              LOG_LEVEL_ERROR);
     {
       std::lock_guard<std::mutex> lock(call->mutex);
@@ -868,7 +868,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     return "Internal server error while processing subscription.\n"
            "处理订阅时发生内部服务器错误。\n";
   } catch (...) {
-    writeLog(LOG_TYPE_ERROR, "[SUB-EXCEPTION] 未知异常类型 (not std::exception)", LOG_LEVEL_ERROR);
+    writeLog(LOG_TYPE_ERROR, "未知异常类型 (not std::exception)", LOG_LEVEL_ERROR);
     {
       std::lock_guard<std::mutex> lock(call->mutex);
       call->exception = std::current_exception();
@@ -1827,8 +1827,9 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
       proxyToClash(nodes, yamlnode, dummy_group, argTarget == "clashr", ext);
       output_content = YAML::Dump(yamlnode);
     } else {
-      if (render_template(fetchFile(lClashBase, proxy, global.cacheConfig,
-                                    true, baseFetchContext),
+      std::string fetched_base = fetchFile(lClashBase, proxy, global.cacheConfig,
+                                           true, baseFetchContext);
+      if (render_template(fetched_base,
                           tpl_args, base_content, global.templatePath) != 0) {
         *status_code = 400;
         return base_content;

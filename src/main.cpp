@@ -1,4 +1,6 @@
 #include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <string>
 #include <unistd.h>
@@ -135,7 +137,6 @@ int main(int argc, char *argv[]) {
   defer(SetConsoleOutputCP(origcp);) SetConsoleOutputCP(65001);
 #else
   signal(SIGPIPE, SIG_IGN);
-  signal(SIGABRT, SIG_IGN);
   signal(SIGHUP, signal_handler);
   signal(SIGQUIT, signal_handler);
 #endif // _WIN32

@@ -13,7 +13,9 @@ struct ParamCompatInfo {
     bool hardcoded;  // true if Mihomo hardcodes this parameter
 };
 
-const std::map<std::string, std::map<std::string, ParamCompatInfo>> PARAM_COMPAT = {
+// Lazy-initialized to avoid stack overflow during static initialization
+inline const std::map<std::string, std::map<std::string, ParamCompatInfo>>& getParamCompat() {
+    static const std::map<std::string, std::map<std::string, ParamCompatInfo>> data = {
     // Protocol: anytls
     {"anytls", {
         {"alpn", {true, "array", false}}, // anytls
@@ -421,12 +423,15 @@ const std::map<std::string, std::map<std::string, ParamCompatInfo>> PARAM_COMPAT
         {"ws-opts", {true, "string", false}}, // vmess
         {"xudp", {true, "bool", true}}, // vmess [HARDCODED]
     }},
-};
+    };
+    return data;
+}
 
 // Check if a protocol supports a specific parameter
 inline bool isParamSupported(const std::string& protocol, const std::string& param) {
-    auto proto_it = PARAM_COMPAT.find(protocol);
-    if (proto_it == PARAM_COMPAT.end()) return false;
+    const auto& compat = getParamCompat();
+    auto proto_it = compat.find(protocol);
+    if (proto_it == compat.end()) return false;
     auto param_it = proto_it->second.find(param);
     return param_it != proto_it->second.end() && param_it->second.supported;
 }
@@ -434,8 +439,9 @@ inline bool isParamSupported(const std::string& protocol, const std::string& par
 // Check if a parameter is hardcoded by Mihomo for this protocol
 // Hardcoded parameters should NOT be overridden by global settings
 inline bool isParamHardcoded(const std::string& protocol, const std::string& param) {
-    auto proto_it = PARAM_COMPAT.find(protocol);
-    if (proto_it == PARAM_COMPAT.end()) return false;
+    const auto& compat = getParamCompat();
+    auto proto_it = compat.find(protocol);
+    if (proto_it == compat.end()) return false;
     auto param_it = proto_it->second.find(param);
     return param_it != proto_it->second.end() && param_it->second.hardcoded;
 }
