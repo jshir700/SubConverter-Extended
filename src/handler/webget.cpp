@@ -1,8 +1,6 @@
-#include <algorithm>
 #include <future>
 #include <iostream>
 #include <map>
-#include <shared_mutex>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <mutex>
@@ -37,7 +35,7 @@ std::mutex cache_rw_lock;
 RWLock cache_rw_lock;
 
 //std::string user_agent_str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36";
-static auto user_agent_str = "subconverter/" VERSION " cURL/" LIBCURL_VERSION;
+static auto user_agent_str = "clash.meta";
 
 struct curl_progress_data
 {
@@ -59,8 +57,8 @@ struct GitHubFileRef
     std::string path;
 };
 
-static std::shared_mutex cache_fetch_mutex;
-static std::unordered_map<std::string, std::shared_future<CacheFetchResult>> cache_fetches;
+static std::mutex cache_fetch_mutex;
+static std::map<std::string, std::shared_future<CacheFetchResult>> cache_fetches;
 
 static CURLcode curl_init()
 {
@@ -70,27 +68,6 @@ static CURLcode curl_init()
         init_result = curl_global_init(CURL_GLOBAL_ALL);
     });
     return init_result;
-}
-
-// Thread-local CURL handle pool for connection reuse.
-// Each thread gets its own persistent handle, avoiding curl_easy_init/cleanup
-// overhead and allowing TCP/TLS connection reuse across requests.
-static CURL* get_thread_local_curl_handle()
-{
-    thread_local CURL *curl_handle = nullptr;
-    if(curl_handle == nullptr)
-    {
-        CURLcode ret = curl_init();
-        if(ret != CURLE_OK)
-        {
-            writeLog(0, "curl_global_init failed: " + std::string(curl_easy_strerror(ret)), LOG_LEVEL_ERROR);
-            return nullptr;
-        }
-        curl_handle = curl_easy_init();
-    }
-    else
-        curl_easy_reset(curl_handle);
-    return curl_handle;
 }
 
 static std::string build_cache_key(const std::string &url, const std::string &proxy,
@@ -327,7 +304,7 @@ bool isFetchUrlAllowed(const std::string &url, FetchContext context)
         return true;
     if(!startsWith(url, "http://") && !startsWith(url, "https://"))
     {
-        writeLog(0, "Blocked public fetch with unsupported URL scheme: " + url,
+        writeLog(0, "已阻止公开请求获取不支持协议的 URL：" + url,
                  LOG_LEVEL_WARNING);
         return false;
     }
@@ -339,7 +316,7 @@ bool isFetchUrlAllowed(const std::string &url, FetchContext context)
     host = normalize_fetch_host(host);
     if(host.empty() || is_blocked_hostname(host) || is_blocked_ip_address(host))
     {
-        writeLog(0, "Blocked public fetch to local/private host: " + url,
+        writeLog(0, "已阻止公开请求访问本地或私有主机：" + url,
                  LOG_LEVEL_WARNING);
         return false;
     }
@@ -348,8 +325,7 @@ bool isFetchUrlAllowed(const std::string &url, FetchContext context)
     if(!resolved.empty() && is_blocked_ip_address(resolved, true))
     {
         writeLog(0,
-                 "Blocked public fetch because host resolves to local/private "
-                 "address: " + url,
+                 "已阻止公开请求：目标主机解析到本地或私有地址：" + url,
                  LOG_LEVEL_WARNING);
         return false;
     }
@@ -367,7 +343,7 @@ static int public_fetch_prereq_callback(void *clientp, char *conn_primary_ip,
        is_blocked_ip_address(conn_primary_ip, true))
     {
         writeLog(0,
-                 "Blocked public fetch connection to local/private address: " +
+                 "已阻止公开请求连接本地或私有地址：" +
                      std::string(conn_primary_ip),
                  LOG_LEVEL_WARNING);
         return CURL_PREREQFUNC_ABORT;
@@ -446,13 +422,13 @@ static int logger(CURL *handle, curl_infotype type, char *data, size_t size, voi
     switch(type)
     {
     case CURLINFO_TEXT:
-        prefix = "CURL_INFO: ";
+        prefix = "CURL 信息：";
         break;
     case CURLINFO_HEADER_IN:
-        prefix = "CURL_HEADER: < ";
+        prefix = "CURL 响应头：< ";
         break;
     case CURLINFO_HEADER_OUT:
-        prefix = "CURL_HEADER: > ";
+        prefix = "CURL 请求头：> ";
         break;
     case CURLINFO_DATA_IN:
     case CURLINFO_DATA_OUT:
@@ -490,9 +466,7 @@ static inline void curl_set_common_options(CURL *curl_handle, const char *url, c
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 20L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, std::max(1L, global.fetch_timeout));
-    curl_easy_setopt(curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
-    curl_easy_setopt(curl_handle, CURLOPT_DNS_CACHE_TIMEOUT, 300L);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl_handle, CURLOPT_COOKIEFILE, "");
     if(data)
     {
@@ -519,14 +493,14 @@ static int curlGet(const FetchArgument &argument, FetchResult &result, CURLcode 
         *result.status_code = 0;
         if(return_code)
             *return_code = retVal;
-        writeLog(0, "curl_easy_init failed.", LOG_LEVEL_ERROR);
+        writeLog(0, "curl_easy_init 失败。", LOG_LEVEL_ERROR);
         return 0;
     }
     if(!argument.proxy.empty())
     {
         if(startsWith(argument.proxy, "cors:"))
         {
-            header_list = curl_slist_append(header_list, "X-Requested-With: subconverter " VERSION);
+            header_list = curl_slist_append(header_list, "X-Requested-With: SubConverter-Extended " VERSION);
             new_url = argument.proxy.substr(5) + argument.url;
         }
         else
@@ -545,7 +519,6 @@ static int curlGet(const FetchArgument &argument, FetchResult &result, CURLcode 
     }
 #endif
     header_list = curl_slist_append(header_list, "Content-Type: application/json;charset=utf-8");
-    header_list = curl_slist_append(header_list, "SubConverter-Request: 1");
     if(argument.request_headers)
     {
         for(auto &x : *argument.request_headers)
@@ -641,6 +614,8 @@ static int curlGet(const FetchArgument &argument, FetchResult &result, CURLcode 
         curl_slist_free_all(cookies);
     }
 
+    curl_easy_cleanup(curl_handle);
+
     if(data && !argument.keep_resp_on_fail)
     {
         if(retVal != CURLE_OK || *result.status_code != 200)
@@ -670,7 +645,7 @@ static int curlGetWithGitHubFallback(const FetchArgument &argument, FetchResult 
         original_cookies = *result.cookies;
 
     writeLog(0,
-             "GitHub raw fetch failed, trying jsDelivr fallback: " +
+             "GitHub Raw 获取失败，正在尝试 jsDelivr 回退源：" +
                  fallback_url,
              LOG_LEVEL_WARNING);
     clear_fetch_output(result);
@@ -685,14 +660,14 @@ static int curlGetWithGitHubFallback(const FetchArgument &argument, FetchResult 
     if(fallback_code == CURLE_OK && fallback_status == 200)
     {
         writeLog(0,
-                 "GitHub raw fallback succeeded via jsDelivr: " +
+                 "GitHub Raw 已通过 jsDelivr 回退源获取成功：" +
                      fallback_url,
                  LOG_LEVEL_INFO);
         return fallback_status;
     }
 
     writeLog(0,
-             "GitHub raw fallback failed via jsDelivr: " + fallback_url,
+             "GitHub Raw 通过 jsDelivr 回退源获取失败：" + fallback_url,
              LOG_LEVEL_WARNING);
     clear_fetch_output(result);
     if(result.response_headers)
@@ -715,7 +690,7 @@ static std::string dataGet(const std::string &url)
     std::string data = urlDecode(url.substr(comma + 1));
     if (global.maxAllowedDownloadSize > 0 &&
         data.size() > static_cast<size_t>(global.maxAllowedDownloadSize)) {
-        writeLog(0, "Blocked data URL because it exceeds max download size.",
+        writeLog(0, "已阻止 data URL：内容超过最大下载大小。",
                  LOG_LEVEL_WARNING);
         return "";
     }
@@ -725,8 +700,7 @@ static std::string dataGet(const std::string &url)
             decoded.size() >
                 static_cast<size_t>(global.maxAllowedDownloadSize)) {
             writeLog(0,
-                     "Blocked decoded data URL because it exceeds max "
-                     "download size.",
+                     "已阻止解码后的 data URL：内容超过最大下载大小。",
                      LOG_LEVEL_WARNING);
             return "";
         }
@@ -770,7 +744,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
             if(difftime(now, mtime) <= cache_ttl) // within TTL
             {
                 if(shouldLog(LOG_LEVEL_VERBOSE))
-                    writeLog(0, "CACHE HIT: '" + url + "', using local cache.");
+                    writeLog(0, "缓存命中：'" + url + "'，使用本地缓存。");
                 //guarded_mutex guard(cache_rw_lock);
                 cache_rw_lock.readLock();
                 defer(cache_rw_lock.readUnlock();)
@@ -779,17 +753,17 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
                 return fileGet(path, true);
             }
             if(shouldLog(LOG_LEVEL_VERBOSE))
-                writeLog(0, "CACHE MISS: '" + url + "', TTL timeout, creating new cache."); // out of TTL
+                writeLog(0, "缓存过期：'" + url + "'，正在创建新缓存。"); // out of TTL
         }
         else
         {
             if(shouldLog(LOG_LEVEL_VERBOSE))
-                writeLog(0, "CACHE NOT EXIST: '" + url + "', creating new cache.");
+                writeLog(0, "缓存不存在：'" + url + "'，正在创建新缓存。");
         }
         std::shared_future<CacheFetchResult> fetch_future;
         bool owner = false;
         {
-            std::unique_lock cache_lock(cache_fetch_mutex);
+            std::lock_guard<std::mutex> lock(cache_fetch_mutex);
             auto iter = cache_fetches.find(url_md5);
             if(iter == cache_fetches.end())
             {
@@ -805,7 +779,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
             }
             else
                 fetch_future = iter->second;
-        } // cache_fetch_mutex released here (block scope)
+        }
 
         CacheFetchResult fetched = fetch_future.get();
         return_code = fetched.status_code;
@@ -829,7 +803,7 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
             if(fileExist(path) && global.serveCacheOnFetchFail) // failed, check if cache exist
             {
                 if(shouldLog(LOG_LEVEL_VERBOSE))
-                    writeLog(0, "Fetch failed. Serving cached content."); // cache exist, serving cache
+                    writeLog(0, "获取失败，返回缓存内容。"); // cache exist, serving cache
                 //guarded_mutex guard(cache_rw_lock);
                 cache_rw_lock.readLock();
                 defer(cache_rw_lock.readUnlock();)
@@ -840,12 +814,12 @@ std::string webGet(const std::string &url, const std::string &proxy, unsigned in
             else
             {
                 if(shouldLog(LOG_LEVEL_VERBOSE))
-                    writeLog(0, "Fetch failed. No local cache available."); // cache not exist or not allow to serve cache, serving nothing
+                    writeLog(0, "获取失败，且没有可用的本地缓存。"); // cache not exist or not allow to serve cache, serving nothing
             }
         }
         if(owner)
         {
-            std::unique_lock cache_erase_lock(cache_fetch_mutex);
+            std::lock_guard<std::mutex> lock(cache_fetch_mutex);
             cache_fetches.erase(url_md5);
         }
         return content;

@@ -26,7 +26,8 @@ struct Settings {
   std::vector<RulesetContent> rulesetsContent;
   std::string listenAddress = "127.0.0.1", defaultUrls, insertUrls,
               managedConfigPrefix;
-  int listenPort = 25500, maxPendingConns = 10, maxConcurThreads = 4;
+  int listenPort = 25500, maxPendingConns = 10, maxConcurThreads = 16,
+      maxServerThreads = 128;
   bool prependInsert = true, skipFailedLinks = false;
   bool APIMode = true; // Hardcoded for security - cannot be changed
   bool writeManagedConfig = false, enableRuleGen = true,
@@ -76,6 +77,11 @@ struct Settings {
   // cache system
   bool serveCacheOnFetchFail = false;
   int cacheSubscription = 60, cacheConfig = 300, cacheRuleset = 21600;
+
+  // request coalescing and short-lived response cache
+  bool enableRequestCoalescing = true, coalesceRetryOn5xx = true;
+  int responseCacheTtl = 0;
+  unsigned long long configGeneration = 0;
 
   // limits
   size_t maxAllowedRulesets = 64, maxAllowedRules = 32768;

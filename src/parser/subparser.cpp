@@ -399,7 +399,7 @@ void explodeVmessConf(std::string content, std::vector<Proxy> &nodes) {
     std::string streamset = "streamSettings", tcpset = "tcpSettings", wsset = "wsSettings";
     regGetMatch(content, "((?i)streamsettings)", 2, 0, &streamset);
     regGetMatch(content, "((?i)tcpsettings)", 2, 0, &tcpset);
-    regGetMatch(content, "((?1)wssettings)", 2, 0, &wsset);
+    regGetMatch(content, "((?i)wssettings)", 2, 0, &wsset);
 
     json.Parse(content.data());
     if (json.HasParseError() || !json.IsObject())
@@ -987,7 +987,7 @@ void explodeMierus(std::string mierus, Proxy &node) {
 }
 
 void explodeHysteria(std::string hysteria, Proxy &node) {
-    printf("explodeHysteria\n");
+    writeLog(0, "正在解析 Hysteria 节点。", LOG_LEVEL_DEBUG);
     hysteria = regReplace(hysteria, "(hysteria|hy)://", "hysteria://");
     if (regMatch(hysteria, "hysteria://(.*?)[:](.*)")) {
         explodeStdHysteria(hysteria, node);
@@ -1286,7 +1286,7 @@ void explodeClash(Node yamlnode, std::vector<Proxy> &nodes) {
                                 singleproxy["plugin-opts"]["host"] >>= pluginopts_host;
                                 tls = safe_as<bool>(singleproxy["plugin-opts"]["tls"]) ? "tls;" : "";
                                 singleproxy["plugin-opts"]["path"] >>= path;
-                                pluginopts_mux = safe_as<bool>(singleproxy["plugin-opts"]["mux"]) ? "mux=4;" : "";
+                                pluginopts_mux = safe_as<bool>(singleproxy["plugin-opts"]["mux"]) ? "4" : "";
                             }
                             break;
                         default:
@@ -1306,7 +1306,7 @@ void explodeClash(Node yamlnode, std::vector<Proxy> &nodes) {
                         pluginopts += pluginopts_host.empty() ? "" : ";obfs-host=" + pluginopts_host;
                         break;
                     case "v2ray-plugin"_hash:
-                        pluginopts = "mode=" + pluginopts_mode + ";" + tls + pluginopts_mux;
+                        pluginopts = "mode=" + pluginopts_mode + ";" + tls;
                         if (!pluginopts_host.empty())
                             pluginopts += "host=" + pluginopts_host + ";";
                         if (!path.empty())
@@ -1466,7 +1466,7 @@ void explodeClash(Node yamlnode, std::vector<Proxy> &nodes) {
                     host = singleproxy["sni"].IsDefined()
                                ? safe_as<std::string>(singleproxy["sni"])
                                : safe_as<std::string>(singleproxy["servername"]);
-                    printf("host:%s", host.c_str());
+                    writeLog(0, "Reality 主机：" + host, LOG_LEVEL_DEBUG);
                     singleproxy["reality-opts"]["public-key"] >>= pbk;
                     singleproxy["reality-opts"]["short-id"] >>= sid;
                 }

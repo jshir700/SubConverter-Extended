@@ -1,9 +1,8 @@
 #include <string>
-#include <mutex>
-#include <shared_mutex>
+#include <algorithm>
 #include <map>
-#include <sstream>
 #include <unordered_set>
+#include <sstream>
 #include <filesystem>
 #include <inja.hpp>
 #include <nlohmann/json.hpp>
@@ -14,10 +13,16 @@
 #include "utils/logger.h"
 #include "utils/network.h"
 #include "utils/regexp.h"
+#include "utils/time_compat.h"
 #include "utils/urlencode.h"
 #include "utils/yamlcpp_extra.h"
 #include "templates.h"
-#include "generator/config/ruleconvert.h"
+
+// 在 ruleconvert.cpp 中定义的全局规则类型白名单
+extern string_array ClashRuleTypes;
+
+static thread_local FetchContext current_template_fetch_context =
+    FetchContext::TrustedConfig;
 
 namespace inja
 {
@@ -39,6 +44,69 @@ static inline void parse_json_pointer(nlohmann::json &json, const std::string &p
     {
         //ignore broken pointer
     }
+}
+
+static bool path_is_inside_scope(const std::filesystem::path &path,
+                                 const std::filesystem::path &scope)
+{
+    try
+    {
+        std::filesystem::path relative = std::filesystem::relative(path, scope);
+        std::string rel = relative.generic_string();
+        return rel == "." ||
+               (!relative.is_absolute() && rel != ".." &&
+                !startsWith(rel, "../"));
+    }
+    catch(std::exception &)
+    {
+        return false;
+    }
+}
+
+static std::string python_string_escape(const std::string &value)
+{
+    static const char hex[] = "0123456789abcdef";
+    std::string escaped;
+    escaped.reserve(value.size());
+    for(unsigned char c : value)
+    {
+        switch(c)
+        {
+        case '\\':
+            escaped += "\\\\";
+            break;
+        case '"':
+            escaped += "\\\"";
+            break;
+        case '\'':
+            escaped += "\\'";
+            break;
+        case '\n':
+            escaped += "\\n";
+            break;
+        case '\r':
+            escaped += "\\r";
+            break;
+        case '\t':
+            escaped += "\\t";
+            break;
+        default:
+            if(c < 0x20)
+            {
+                escaped += "\\x";
+                escaped += hex[c >> 4];
+                escaped += hex[c & 0x0f];
+            }
+            else
+                escaped += static_cast<char>(c);
+        }
+    }
+    return escaped;
+}
+
+static std::string python_string_literal(const std::string &value)
+{
+    return "\"" + python_string_escape(value) + "\"";
 }
 
 /*
@@ -76,13 +144,30 @@ std::string parseHostname(inja::Arguments &args)
 std::string template_webGet(inja::Arguments &args)
 {
     std::string data = args.at(0)->get<std::string>(), proxy = parseProxy(global.proxyConfig);
-    writeLog(0, "Template called fetch with url '" + data + "'.", LOG_LEVEL_INFO);
-    return webGet(data, proxy, global.cacheConfig);
+    writeLog(0, "模板调用 fetch，URL：'" + data + "'。", LOG_LEVEL_INFO);
+    return webGet(data, proxy, global.cacheConfig, nullptr, nullptr,
+                  current_template_fetch_context);
 }
 #endif // NO_WEBGET
 
-int render_template(const std::string &content, const template_args &vars, std::string &output, const std::string &include_scope)
+int render_template(const std::string &content, const template_args &vars,
+                    std::string &output, const std::string &include_scope,
+                    FetchContext context)
 {
+    struct TemplateFetchContextGuard
+    {
+        FetchContext previous;
+        explicit TemplateFetchContextGuard(FetchContext context)
+            : previous(current_template_fetch_context)
+        {
+            current_template_fetch_context = context;
+        }
+        ~TemplateFetchContextGuard()
+        {
+            current_template_fetch_context = previous;
+        }
+    } guard(context);
+
     std::string absolute_scope;
     try
     {
@@ -112,25 +197,8 @@ int render_template(const std::string &content, const template_args &vars, std::
     for(auto &x : vars.local_vars)
         parse_json_pointer(data["local"], x.first, x.second);
 
-    // Inja template compilation cache: compiled templates are cached by content string
-    // to avoid redundant parsing on every render() call. Using content as key eliminates
-    // hash collision risk entirely.
-    static std::unordered_map<std::string, inja::Template> template_cache;
-    static std::shared_mutex template_cache_mutex;
-    static constexpr size_t TEMPLATE_CACHE_MAX = 256;
-
-    inja::Template compiled_template;
-    bool is_cached = false;
-    {
-        std::shared_lock lock(template_cache_mutex);
-        auto it = template_cache.find(content);
-        if (it != template_cache.end()) {
-            compiled_template = it->second;
-            is_cached = true;
-        }
-    }
-
     inja::Environment env;
+
     env.set_trim_blocks(true);
     env.set_lstrip_blocks(true);
     env.set_line_statement("#~#");
@@ -246,46 +314,35 @@ int render_template(const std::string &content, const template_args &vars, std::
 #endif // NO_WEBGET
     //env.add_callback("parseHostname", 1, parseHostname);
 
-    env.set_include_callback([&](const std::string &name, const std::string &template_name)
+    env.set_include_callback([&](const std::filesystem::path &path, const std::string &template_name)
     {
+        const std::string include_path = path.string();
         std::string absolute_path;
         try
         {
-            absolute_path = std::filesystem::canonical(template_name).string();
+            absolute_path = std::filesystem::canonical(path).string();
         }
         catch(std::exception &e)
         {
             throw inja::FileError(e.what());
         }
-        if(!absolute_scope.empty() && !startsWith(absolute_path, absolute_scope))
+        if(!absolute_scope.empty() &&
+           !path_is_inside_scope(absolute_path, absolute_scope))
             throw inja::FileError("access denied when trying to include '" + template_name + "': out of scope");
-        return env.parse(fileGet(template_name, true));
+        return env.parse(fileGet(include_path, true));
     });
     env.set_search_included_templates_in_files(false);
 
     try
     {
         std::stringstream out;
-        if (is_cached) {
-            // Use cached compiled template — avoids Inja's parse() cost
-            env.render_to(out, compiled_template, data);
-        } else {
-            auto parsed = env.parse(content);
-            // Cache the compiled template under write lock (populate on miss)
-            {
-                std::unique_lock lock(template_cache_mutex);
-                if (template_cache.size() >= TEMPLATE_CACHE_MAX)
-                    template_cache.clear();
-                template_cache[content] = parsed;
-            }
-            env.render_to(out, parsed, data);
-        }
+        env.render_to(out, env.parse(content), data);
         output = out.str();
         return 0;
     }
     catch (std::exception &e)
     {
-        output = "Template render failed! Reason: " + std::string(e.what());
+        output = "模板渲染失败。原因：" + std::string(e.what());
         writeLog(0, output, LOG_LEVEL_ERROR);
         return -1;
     }
@@ -348,16 +405,13 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
     std::string strLine, rule_group, rule_path, rule_path_typed, rule_name, old_rule_name;
     std::stringstream strStrm;
     string_array vArray, groups;
-    std::unordered_set<std::string> groupsSet;
+    std::unordered_set<std::string> groupsSet, dedupKeys;
     string_map keywords, urls, names;
     std::map<std::string, bool> has_domain, has_ipcidr;
     std::map<std::string, int> ruleset_interval, rule_type;
-    std::map<std::string, std::string> ruleset_user_agent;
-    std::map<std::string, std::string> ruleset_proxy;       // per-rule proxy for rule-provider
+    string_map ruleset_user_agent, ruleset_proxy;
     string_array rules;
     int index = 0;
-    bool ruleset_inline_expand = false;                     // true when provider=false for SURGE-type rulesets
-    std::unordered_set<std::string> dedupKeys;
 
     if(!overwrite_original_rules && base_rule["rules"].IsDefined())
         rules = safe_as<string_array>(base_rule["rules"]);
@@ -379,20 +433,14 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     vArray = split(strLine, ",");
                     if(vArray.size() < 2)
                         continue;
-                    geoips += "\"" + vArray[1] + "\": \"" + rule_group + "\",";
+                    geoips += python_string_literal(vArray[1]) + ": " +
+                              python_string_literal(rule_group) + ",";
                 }
                 continue;
             }
             if(startsWith(strLine, "FINAL"))
-                strLine.replace(0, 5, "MATCH");
-            if(dedup) {
-                std::string key = getRuleKey(strLine);
-                if(!dedupKeys.emplace(key).second)
-                    continue;
-            }
-            strLine += "," + rule_group;
-            if(count_least(strLine, ',', 3))
-                strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
+                strLine = "MATCH";
+            strLine = appendClashRuleTarget(strLine, rule_group);
             rules.emplace_back(std::move(strLine));
             continue;
         }
@@ -400,55 +448,6 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         {
             if(x.rule_type == RULESET_CLASH_IPCIDR || x.rule_type == RULESET_CLASH_DOMAIN || x.rule_type == RULESET_CLASH_CLASSICAL)
             {
-                // provider=false → inline expand (server-side fetch already done)
-                // provider=true → generate rule-provider
-                if(!x.provider)
-                {
-                    // Inline expand: server-side fetch already done, expand directly
-                    retrieved_rules = x.rule_content.get();
-                    if(retrieved_rules.empty())
-                    {
-                        writeLog(0, "Failed to fetch or empty ruleset: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
-                        continue;
-                    }
-                    retrieved_rules = convertRuleset(retrieved_rules, x.rule_type);
-                    char delimiter = getLineBreak(retrieved_rules);
-                    strStrm.clear();
-                    strStrm<<retrieved_rules;
-                    while(getline(strStrm, strLine, delimiter))
-                    {
-                        if(!strLine.empty() && strLine.back() == '\r')
-                            strLine.pop_back();
-                        if(strLine.empty() || strLine[0] == ';' || strLine[0] == '#' || (strLine.size() >= 2 && strLine[0] == '/' && strLine[1] == '/'))
-                            continue;
-                        strLine = trimWhitespace(strLine, true, true);
-                        if(strLine.empty()) continue;
-                        // Filter non-Clash rule types (PROTOCOL, IP-VERSION, USER-AGENT, etc.)
-                        // URL-REGEX can be converted to DOMAIN-REGEX; everything else is skipped
-                        {
-                            bool is_clash_rule = false;
-                            for(const auto &t : ClashRuleTypes)
-                                if(startsWith(strLine, t)) { is_clash_rule = true; break; }
-                            if(!is_clash_rule)
-                            {
-                                if(startsWith(strLine, "URL-REGEX,"))
-                                    strLine = "DOMAIN-REGEX," + strLine.substr(10);
-                                else
-                                    continue;
-                            }
-                        }
-                        if(dedup) {
-                            std::string key = getRuleKey(strLine);
-                            if(!dedupKeys.emplace(key).second)
-                                continue;
-                        }
-                        strLine += "," + rule_group;
-                        if(count_least(strLine, ',', 3))
-                            strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
-                        rules.emplace_back(std::move(strLine));
-                    }
-                    continue;
-                }
                 //rule_name = std::to_string(hash_(rule_group + rule_path));
                 rule_name = old_rule_name = urlDecode(findFileName(rule_path));
                 int idx = 2;
@@ -458,10 +457,6 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 urls[rule_name] = "*" + rule_path;
                 rule_type[rule_name] = x.rule_type;
                 ruleset_interval[rule_name] = x.update_interval;
-                if(!x.user_agent.empty())
-                    ruleset_user_agent[rule_name] = x.user_agent;
-                if(!x.proxy.empty())
-                    ruleset_proxy[rule_name] = x.proxy;
                 switch(x.rule_type)
                 {
                 case RULESET_CLASH_IPCIDR:
@@ -473,6 +468,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                 case RULESET_CLASH_CLASSICAL:
                     break;
                 }
+                if(!script)
+                    rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                 groups.emplace_back(rule_name);
                 groupsSet.emplace(rule_name);
                 continue;
@@ -493,28 +490,29 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     ruleset_interval[rule_name] = x.update_interval;
                     if(!x.user_agent.empty())
                         ruleset_user_agent[rule_name] = x.user_agent;
-                    // Priority chain:
-                    // 1. x.provider_explicit → per-rule ,provider= (ignores &rules-provider=)
-                    //    - x.provider=true  → generate rule-provider
-                    //    - x.provider=false → inline expand
-                    // 2. x.provider_override → &rules-provider= global was applied
-                    //    - x.provider=true  → generate rule-provider
-                    //    - x.provider=false → inline expand
-                    // 3. default (no ,provider=, no &rules-provider=) → generate rule-provider
-                    //    (replaces legacy &classic= behavior)
+                    if(!x.proxy.empty())
+                        ruleset_proxy[rule_name] = x.proxy;
+                    switch(x.rule_type)
+                    {
+                    case RULESET_CLASH_IPCIDR:
+                        has_ipcidr[rule_name] = true;
+                        break;
+                    case RULESET_CLASH_DOMAIN:
+                        has_domain[rule_name] = true;
+                        break;
+                    case RULESET_CLASH_CLASSICAL:
+                        break;
+                    }
                     if(x.provider_explicit)
                     {
-                        // Per-rule ,provider= explicitly set
                         if(x.provider)
                         {
-                            // ,provider=true or non-false: generate rule-provider
                             if(!script)
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
                             groups.emplace_back(rule_name);
                             groupsSet.emplace(rule_name);
                             continue;
                         }
-                        // ,provider=false: inline expand (clear intermediate state)
                         urls.erase(rule_name);
                         names.erase(rule_name);
                         rule_type.erase(rule_name);
@@ -522,9 +520,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         ruleset_user_agent.erase(rule_name);
                         ruleset_proxy.erase(rule_name);
                         ruleset_inline_expand = true;
-                        // fall through to inline expansion code below
                     }
-                    // No explicit ,provider=: check &rules-provider= global override
                     else if(x.provider_override)
                     {
                         if(x.provider)
@@ -535,7 +531,6 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                             groupsSet.emplace(rule_name);
                             continue;
                         }
-                        // &rules-provider=false: inline expand (clear intermediate state)
                         urls.erase(rule_name);
                         names.erase(rule_name);
                         rule_type.erase(rule_name);
@@ -543,10 +538,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         ruleset_user_agent.erase(rule_name);
                         ruleset_proxy.erase(rule_name);
                         ruleset_inline_expand = true;
-                        // fall through to inline expansion code below
                     }
-                    // No ,provider= and no &rules-provider=: default → generate rule-provider
-                    // This replaces the legacy &classic= parameter which has been removed.
                     else
                     {
                         if(!script)
@@ -563,7 +555,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
             retrieved_rules = x.rule_content.get();
             if(retrieved_rules.empty())
             {
-                writeLog(0, "Failed to fetch ruleset or ruleset is empty: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
+                writeLog(0, "获取规则集失败或规则集为空：'" + x.rule_path + "'。", LOG_LEVEL_WARNING);
                 continue;
             }
 
@@ -584,12 +576,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
 
                 if(ruleset_inline_expand && !script)
                 {
-                    // Inline expansion mode: add ALL rule types directly into the rules list.
-                    // No RULE-SET entries are generated; all rules are expanded inline.
                     strLine = trimWhitespace(strLine, true, true);
                     if(strLine.empty()) continue;
-                    // Filter non-Clash rule types against ClashRuleTypes
-                    // URL-REGEX can be converted to DOMAIN-REGEX; everything else is skipped
                     {
                         bool is_clash_rule = false;
                         for(const auto &t : ClashRuleTypes)
@@ -620,17 +608,14 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         if(vArray.size() < 2)
                             continue;
                         if(keywords.find(rule_name) == keywords.end())
-                            keywords[rule_name] = "\"" + trim(vArray[1]) + "\"";
+                            keywords[rule_name] =
+                                python_string_literal(trim(vArray[1]));
                         else
-                            keywords[rule_name] += ",\"" + trim(vArray[1]) + "\"";
+                            keywords[rule_name] += "," +
+                                                   python_string_literal(trim(vArray[1]));
                     }
                     else
                     {
-                        if(dedup) {
-                            std::string key = getRuleKey(strLine);
-                            if(!dedupKeys.emplace(key).second)
-                                continue;
-                        }
                         vArray = split(strLine, ",");
                         if(vArray.size() < 2)
                         {
@@ -641,6 +626,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                             strLine = vArray[0] + "," + trim(vArray[1]) + "," + rule_group;
                             if(vArray.size() > 2)
                                 strLine += "," + vArray[2];
+                        }
+                        if(dedup) {
+                            std::string key = getRuleKey(strLine);
+                            if(!dedupKeys.emplace(key).second)
+                                continue;
                         }
                         rules.emplace_back(strLine);
                     }
@@ -654,8 +644,6 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                         has_no_resolve = true;
                 }
             }
-            // In inline expansion mode: skip RULE-SET generation and groups
-            // (all rules were already added inline in the while loop above)
             if(!ruleset_inline_expand)
             {
                 if(has_domain[rule_name] && !script)
@@ -742,8 +730,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
             std::string json_path = "rules." + std::to_string(index) + ".";
             parse_json_pointer(data, json_path + "has_domain", group_has_domain ? "true" : "false");
             parse_json_pointer(data, json_path + "has_ipcidr", group_has_ipcidr ? "true" : "false");
-            parse_json_pointer(data, json_path + "name", x);
-            parse_json_pointer(data, json_path + "group", name);
+            parse_json_pointer(data, json_path + "name", python_string_escape(x));
+            parse_json_pointer(data, json_path + "group", python_string_escape(name));
             parse_json_pointer(data, json_path + "set", "true");
             parse_json_pointer(data, json_path + "keyword", keyword);
             parse_json_pointer(data, json_path + "original", (rule_type[x] == RULESET_CLASH_DOMAIN || rule_type[x] == RULESET_CLASH_IPCIDR) ? "true" : "false");
@@ -755,7 +743,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         if(!geoips.empty())
             parse_json_pointer(data, "geoips", geoips.erase(geoips.size() - 1));
 
-        parse_json_pointer(data, "match_group", match_group);
+        parse_json_pointer(data, "match_group",
+                           python_string_escape(match_group));
 
         inja::Environment env;
         env.include_template("keyword_template", env.parse(clash_script_keyword_template));
@@ -769,7 +758,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         }
         catch (std::exception &e)
         {
-            writeLog(0, "Error when rendering: " + std::string(e.what()), LOG_TYPE_ERROR);
+            writeLog(0, "渲染时发生错误：" + std::string(e.what()), LOG_TYPE_ERROR);
             return -1;
         }
     }

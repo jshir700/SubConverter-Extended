@@ -214,7 +214,7 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_
         retrieved_rules = x.rule_content.get();
         if(retrieved_rules.empty())
         {
-            writeLog(0, "Failed to fetch ruleset or ruleset is empty: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
+            writeLog(0, "获取规则集失败或规则集为空：'" + x.rule_path + "'。", LOG_LEVEL_WARNING);
             continue;
         }
         if(startsWith(retrieved_rules, "[]"))
@@ -369,7 +369,7 @@ std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent>
         retrieved_rules = x.rule_content.get();
         if(retrieved_rules.empty())
         {
-            writeLog(0, "Failed to fetch ruleset or ruleset is empty: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
+            writeLog(0, "获取规则集失败或规则集为空：'" + x.rule_path + "'。", LOG_LEVEL_WARNING);
             continue;
         }
         if(startsWith(retrieved_rules, "[]"))
@@ -564,7 +564,7 @@ void rulesetToSurge(INIReader &base_rule, std::vector<RulesetContent> &ruleset_c
             retrieved_rules = x.rule_content.get();
             if(retrieved_rules.empty())
             {
-                writeLog(0, "Failed to fetch ruleset or ruleset is empty: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
+                writeLog(0, "获取规则集失败或规则集为空：'" + x.rule_path + "'。", LOG_LEVEL_WARNING);
                 continue;
             }
 
@@ -722,7 +722,7 @@ void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent
         retrieved_rules = x.rule_content.get();
         if(retrieved_rules.empty())
         {
-            writeLog(0, "Failed to fetch ruleset or ruleset is empty: '" + x.rule_path + "'!", LOG_LEVEL_WARNING);
+            writeLog(0, "获取规则集失败或规则集为空：'" + x.rule_path + "'。", LOG_LEVEL_WARNING);
             continue;
         }
         if(startsWith(retrieved_rules, "[]"))

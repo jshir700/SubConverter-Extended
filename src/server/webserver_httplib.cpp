@@ -5,6 +5,7 @@
 #ifndef CPPHTTPLIB_LISTEN_BACKLOG
 #define CPPHTTPLIB_LISTEN_BACKLOG 10240
 #endif // CPPHTTPLIB_LISTEN_BACKLOG
+#define CPPHTTPLIB_MAX_LINE_LENGTH 819200
 #define CPPHTTPLIB_REQUEST_URI_MAX_LENGTH 819200
 #define CPPHTTPLIB_HEADER_MAX_LENGTH 819200
 #define CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH 819200
@@ -16,6 +17,7 @@
 #include "utils/stl_extra.h"
 #include "utils/string_hash.h"
 #include "utils/urlencode.h"
+#include "handler/settings.h"
 #include "webserver.h"
 
 
@@ -163,16 +165,16 @@ int WebServer::start_web_server_multi(listener_args *args) {
 
     if (shouldLog(LOG_LEVEL_DEBUG)) {
       writeLog(0,
-               "Accept connection from client " + req.remote_addr + ":" +
+               "接受客户端连接：" + req.remote_addr + ":" +
                    std::to_string(req.remote_port),
                LOG_LEVEL_DEBUG);
     }
     if (shouldLog(LOG_LEVEL_VERBOSE)) {
       writeLog(0,
-               "handle_cmd:    " + req.method + " handle_uri:    " +
+               "处理请求：method=" + req.method + " uri=" +
                    req.target,
                LOG_LEVEL_VERBOSE);
-      writeLog(0, "handle_header: " + dump(req.headers), LOG_LEVEL_VERBOSE);
+      writeLog(0, "请求头：" + dump(req.headers), LOG_LEVEL_VERBOSE);
     }
 
     if (req.has_header("SubConverter-Request")) {
@@ -185,7 +187,8 @@ int WebServer::start_web_server_multi(listener_args *args) {
                       "text/plain");
       return httplib::Server::HandlerResponse::Handled;
     }
-    res.set_header("Server", "subconverter/" VERSION " cURL/" LIBCURL_VERSION);
+    res.set_header("Server",
+                   "SubConverter-Extended/" VERSION " cURL/" LIBCURL_VERSION);
     if (require_auth) {
       static std::string auth_token =
           "Basic " + base64Encode(auth_user + ":" + auth_password);
@@ -252,11 +255,12 @@ int WebServer::start_web_server_multi(listener_args *args) {
     server.set_mount_point("/", serve_file_root);
   }
   server.new_task_queue = [args] {
-    return new httplib::ThreadPool(args->max_workers);
+    return new httplib::ThreadPool(args->max_workers,
+                                   global.maxServerThreads);
   };
   if (!server.bind_to_port(args->listen_address, args->port, 0)) {
     writeLog(0,
-             "Failed to bind HTTP server at " + args->listen_address + ":" +
+             "无法绑定 HTTP 服务地址：" + args->listen_address + ":" +
                  std::to_string(args->port),
              LOG_LEVEL_FATAL);
     return 1;
@@ -264,7 +268,7 @@ int WebServer::start_web_server_multi(listener_args *args) {
 
   std::thread thread([&]() {
     if (!server.listen_after_bind() && !SERVER_EXIT_FLAG) {
-      writeLog(0, "HTTP server stopped before accepting requests.",
+      writeLog(0, "HTTP 服务在接受请求前停止。",
                LOG_LEVEL_ERROR);
       SERVER_EXIT_FLAG = true;
     }

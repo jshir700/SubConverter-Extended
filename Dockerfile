@@ -1,11 +1,12 @@
 # ========== GO BUILD STAGE ==========
 # 使用 glibc (Debian) 构建 Go 共享库，避免 musl 下 Go runtime 初始化崩溃
-FROM golang:latest AS go-builder
+FROM mirror.gcr.io/library/golang:latest AS go-builder
 
 ARG TARGETARCH
 ARG TARGETVARIANT
 ARG MIHOMO_REF="Meta"
 ARG MIHOMO_CACHE_BUST=1
+ARG REFRESH_GO_DEPS=false
 
 WORKDIR /build/bridge
 
@@ -14,21 +15,19 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends git build-essential && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy Go source code FIRST (needed for dependency analysis)
+# Copy committed Go module files and source.
+COPY bridge/go.mod bridge/go.sum ./
 COPY bridge/converter.go ./
 
-# Initialize new go.mod dynamically
-RUN go mod init github.com/aethersailor/subconverter-extended/bridge
-
-# Get latest Mihomo and resolve all dependencies
-RUN echo "MIHOMO_CACHE_BUST=$MIHOMO_CACHE_BUST" && \
-    go get github.com/metacubex/mihomo@${MIHOMO_REF}
-
-# Upgrade all dependencies to latest versions (security fix)
-RUN go get -u all
-
-# Tidy dependencies (auto-resolves transitive deps)
-RUN go mod tidy
+RUN set -xe && \
+    if [ "${REFRESH_GO_DEPS}" = "true" ]; then \
+      echo "MIHOMO_CACHE_BUST=$MIHOMO_CACHE_BUST" && \
+      go get github.com/metacubex/mihomo@${MIHOMO_REF} && \
+      go get -u all && \
+      go mod tidy; \
+    else \
+      go mod download; \
+    fi
 
 # Copy scripts for scheme generation
 COPY scripts/ ../scripts/
@@ -53,17 +52,19 @@ RUN ls -lh libmihomo.so libmihomo.h
 
 # ========== C++ BUILD STAGE ==========
 # 使用 Debian (glibc) 编译，运行时再搬运依赖到 Alpine
-FROM debian:latest AS builder
+FROM mirror.gcr.io/library/debian:latest AS builder
 ARG THREADS="4"
 ARG SHA=""
 ARG VERSION="dev"
 ARG BUILD_DATE=""
+ARG REFRESH_HEADERS=false
+ARG SOURCE_DEPS_CACHE_BUST=stable
 
 WORKDIR /
 
 # 安装 Debian 构建依赖
 RUN apt-get update && \
-    apt-get install -y --fix-missing --no-install-recommends \
+    apt-get install -y --no-install-recommends \
     git g++ build-essential cmake python3 python3-pip \
     pkg-config curl \
     libcurl4-openssl-dev libpcre2-dev rapidjson-dev \
@@ -72,9 +73,9 @@ RUN apt-get update && \
 
 # quickjspp
 RUN set -xe && \
-    git clone --depth=1 https://github.com/ftk/quickjspp.git && \
+    echo "SOURCE_DEPS_CACHE_BUST=${SOURCE_DEPS_CACHE_BUST}" && \
+    git clone --depth=1 --recurse-submodules --shallow-submodules https://github.com/ftk/quickjspp.git quickjspp && \
     cd quickjspp && \
-    git submodule update --init && \
     cmake -DCMAKE_BUILD_TYPE=Release . && \
     make quickjs -j ${THREADS} && \
     install -d /usr/lib/quickjs/ && \
@@ -85,9 +86,9 @@ RUN set -xe && \
 
 # libcron
 RUN set -xe && \
-    git clone https://github.com/PerMalmberg/libcron --depth=1 && \
+    echo "SOURCE_DEPS_CACHE_BUST=${SOURCE_DEPS_CACHE_BUST}" && \
+    git clone --depth=1 --recurse-submodules --shallow-submodules https://github.com/PerMalmberg/libcron.git libcron && \
     cd libcron && \
-    git submodule update --init && \
     cmake -DCMAKE_BUILD_TYPE=Release . && \
     make libcron -j ${THREADS} && \
     install -m644 libcron/out/Release/liblibcron.a /usr/lib/ && \
@@ -96,9 +97,9 @@ RUN set -xe && \
     install -d /usr/include/date/ && \
     install -m644 libcron/externals/date/include/date/* /usr/include/date/
 
-# toml11 (跟随默认分支最新版本)
 RUN set -xe && \
-    git clone https://github.com/ToruNiina/toml11 --depth=1 && \
+    echo "SOURCE_DEPS_CACHE_BUST=${SOURCE_DEPS_CACHE_BUST}" && \
+    git clone --depth=1 https://github.com/ToruNiina/toml11.git toml11 && \
     cd toml11 && \
     cmake -DCMAKE_CXX_STANDARD=11 . && \
     make install -j ${THREADS}
@@ -109,25 +110,35 @@ COPY --from=go-builder /build/bridge/libmihomo.h /usr/include/
 COPY --from=go-builder /build/bridge/go.mod /src/bridge/go.mod
 COPY --from=go-builder /build/bridge/go.sum /src/bridge/go.sum
 
-# build subconverter from THIS repository source
+# build SubConverter-Extended from THIS repository source
 WORKDIR /src
 COPY . /src
 COPY --from=go-builder /build/bridge/mihomo_schemes.h /src/src/parser/mihomo_schemes.h
 COPY --from=go-builder /build/bridge/param_compat.h /src/src/parser/param_compat.h
 
-# Download latest header-only libraries (non-fatal, local copies used as fallback)
 RUN set -xe && \
-    echo "Downloading latest cpp-httplib..." && \
-    curl -fsSL https://raw.githubusercontent.com/yhirose/cpp-httplib/master/httplib.h -o include/httplib.h || echo "WARN: httplib download failed, using local copy" && \
-    echo "Downloading latest nlohmann/json..." && \
-    curl -fsSL https://github.com/nlohmann/json/releases/latest/download/json.hpp -o include/nlohmann/json.hpp || echo "WARN: json.hpp download failed, using local copy" && \
-    echo "Downloading latest inja..." && \
-    curl -fsSL https://raw.githubusercontent.com/pantor/inja/master/single_include/inja/inja.hpp -o include/inja.hpp || echo "WARN: inja download failed, using local copy" && \
-    echo "Downloading latest jpcre2..." && \
-    curl -fsSL https://raw.githubusercontent.com/jpcre2/jpcre2/master/src/jpcre2.hpp -o include/jpcre2.hpp || echo "WARN: jpcre2 download failed, using local copy" && \
-    echo "Copying latest quickjspp from compiled source..." && \
-    cp /usr/include/quickjspp.hpp include/quickjspp.hpp && \
-    echo "All header libraries updated to latest versions"
+    if [ "${REFRESH_HEADERS}" = "true" ]; then \
+      echo "Downloading latest cpp-httplib..." && \
+      curl -fsSL https://raw.githubusercontent.com/yhirose/cpp-httplib/master/httplib.h -o include/httplib.h && \
+      echo "Downloading latest nlohmann/json..." && \
+      curl -fsSL https://github.com/nlohmann/json/releases/latest/download/json.hpp -o include/nlohmann/json.hpp && \
+      echo "Downloading latest inja..." && \
+      curl -fsSL https://raw.githubusercontent.com/pantor/inja/master/single_include/inja/inja.hpp -o include/inja.hpp && \
+      echo "Downloading latest jpcre2..." && \
+      curl -fsSL https://raw.githubusercontent.com/jpcre2/jpcre2/master/src/jpcre2.hpp -o include/jpcre2.hpp && \
+      echo "Copying latest quickjspp from compiled source..." && \
+      cp /usr/include/quickjspp.hpp include/quickjspp.hpp && \
+      echo "Copying latest libcron headers from compiled source..." && \
+      rm -rf include/libcron include/date && \
+      cp -a /libcron/libcron/include/libcron include/libcron && \
+      cp -a /libcron/libcron/externals/date/include/date include/date && \
+      echo "Copying latest toml11 headers from compiled source..." && \
+      rm -rf include/toml11 && \
+      cp /toml11/include/toml.hpp include/toml.hpp && \
+      cp -a /toml11/include/toml11 include/toml11; \
+    else \
+      echo "Using committed header libraries"; \
+    fi
 
 RUN set -xe && \
     [ -n "${SHA}" ] && sed -i "s/#define BUILD_ID \"\"/#define BUILD_ID \"${SHA}\"/ " src/version.h || true && \
@@ -180,7 +191,7 @@ RUN set -xe && \
 
 # ========== FINAL STAGE ==========
 # Alpine 运行时 + 搬运 glibc 依赖（不固定版本）
-FROM alpine:latest
+FROM mirror.gcr.io/library/alpine:latest
 
 ARG VERSION="dev"
 ARG SHA=""
