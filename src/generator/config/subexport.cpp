@@ -154,13 +154,13 @@ static void insertProxiesBeforeTarget(std::string &yaml_str,
   }
 }
 
-const string_array clashr_protocols = {"origin",          "auth_sha1_v4",
+const std::unordered_set<std::string> clashr_protocols = {"origin",          "auth_sha1_v4",
                                        "auth_aes128_md5", "auth_aes128_sha1",
                                        "auth_chain_a",    "auth_chain_b"};
-const string_array clashr_obfs = {
+const std::unordered_set<std::string> clashr_obfs = {
     "plain",       "http_simple",        "http_post",
     "random_head", "tls1.2_ticket_auth", "tls1.2_ticket_fastauth"};
-const string_array clash_ssr_ciphers = {
+const std::unordered_set<std::string> clash_ssr_ciphers = {
     "rc4-md5",     "aes-128-ctr", "aes-192-ctr",   "aes-256-ctr", "aes-128-cfb",
     "aes-192-cfb", "aes-256-cfb", "chacha20-ietf", "xchacha20",   "none"};
 bool isNumeric(const std::string &str) {
@@ -292,7 +292,7 @@ bool applyMatcher(const std::string &rule, std::string &real_rule,
   return true;
 }
 
-void processRemark(std::string &remark, const string_array &remarks_list,
+void processRemark(std::string &remark, const std::unordered_set<std::string> &remarks_list,
                    bool proc_comma = true) {
   // Replace every '=' with '-' in the remark string to avoid parse errors from
   // the clients.
@@ -593,15 +593,11 @@ void proxyToClash(std::vector<Proxy> &nodes, YAML::Node &yamlnode,
     case ProxyType::ShadowsocksR:
       // ignoring all nodes with unsupported obfs, protocols and encryption
       if (ext.filter_deprecated) {
-        if (!clashR &&
-            std::find(clash_ssr_ciphers.cbegin(), clash_ssr_ciphers.cend(),
-                      x.EncryptMethod) == clash_ssr_ciphers.cend())
+        if (!clashR && clash_ssr_ciphers.count(x.EncryptMethod) == 0)
           continue;
-        if (std::find(clashr_protocols.cbegin(), clashr_protocols.cend(),
-                      x.Protocol) == clashr_protocols.cend())
+        if (clashr_protocols.count(x.Protocol) == 0)
           continue;
-        if (std::find(clashr_obfs.cbegin(), clashr_obfs.cend(), x.OBFS) ==
-            clashr_obfs.cend())
+        if (clashr_obfs.count(x.OBFS) == 0)
           continue;
       }
 

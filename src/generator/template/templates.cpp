@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <inja.hpp>
 #include <nlohmann/json.hpp>
+#include <shared_mutex>
 
 #include "handler/interfaces.h"
 #include "handler/settings.h"
@@ -197,6 +198,22 @@ int render_template(const std::string &content, const template_args &vars,
     for(auto &x : vars.local_vars)
         parse_json_pointer(data["local"], x.first, x.second);
 
+    // Inja template compilation cache: compiled templates are cached by content
+    static std::unordered_map<std::string, inja::Template> template_cache;
+    static std::shared_mutex template_cache_mutex;
+    static constexpr size_t TEMPLATE_CACHE_MAX = 256;
+
+    inja::Template compiled_template;
+    bool is_cached = false;
+    {
+        std::shared_lock lock(template_cache_mutex);
+        auto it = template_cache.find(content);
+        if (it != template_cache.end()) {
+            compiled_template = it->second;
+            is_cached = true;
+        }
+    }
+
     inja::Environment env;
 
     env.set_trim_blocks(true);
@@ -336,7 +353,18 @@ int render_template(const std::string &content, const template_args &vars,
     try
     {
         std::stringstream out;
-        env.render_to(out, env.parse(content), data);
+        if (is_cached) {
+            env.render_to(out, compiled_template, data);
+        } else {
+            auto parsed = env.parse(content);
+            {
+                std::unique_lock lock(template_cache_mutex);
+                if (template_cache.size() >= TEMPLATE_CACHE_MAX)
+                    template_cache.clear();
+                template_cache[content] = parsed;
+            }
+            env.render_to(out, parsed, data);
+        }
         output = out.str();
         return 0;
     }

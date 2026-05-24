@@ -466,8 +466,16 @@ static inline void curl_set_common_options(CURL *curl_handle, const char *url, c
     curl_easy_setopt(curl_handle, CURLOPT_MAXREDIRS, 20L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, global.fetch_timeout);
     curl_easy_setopt(curl_handle, CURLOPT_COOKIEFILE, "");
+    // Enable TCP keepalive for long-lived connections
+    curl_easy_setopt(curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_TCP_KEEPIDLE, 60L);
+    curl_easy_setopt(curl_handle, CURLOPT_TCP_KEEPINTVL, 30L);
+    // Cache DNS results for 5 minutes to avoid redundant lookups
+    curl_easy_setopt(curl_handle, CURLOPT_DNS_CACHE_TIMEOUT, 300L);
+    // Allow HTTP/1.1 keep-alive connection reuse
+    curl_easy_setopt(curl_handle, CURLOPT_FORBID_REUSE, 0L);
     if(data)
     {
         if(data->size_limit)
@@ -635,7 +643,6 @@ static int curlGet(const FetchArgument &argument, FetchResult &result, CURLcode 
     {
         if(retVal != CURLE_OK || *result.status_code != 200)
             data->clear();
-        data->shrink_to_fit();
     }
 
     return *result.status_code;

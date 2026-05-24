@@ -95,7 +95,6 @@ private:
     template <typename T> inline void erase_elements(std::vector<T> &target)
     {
         target.clear();
-        target.shrink_to_fit();
     }
 
     template <typename T> inline void erase_elements(T &target)

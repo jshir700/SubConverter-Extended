@@ -934,8 +934,10 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   std::string argRenames = getUrlArg(argument, "rename"),
               argFilterScript = getUrlArg(argument, "filter_script");
   std::string argUserAgent = getUrlArg(argument, "ua"),
-              argFetchTimeout = getUrlArg(argument, "fetch_timeout"),
               argGlobalUA = getUrlArg(argument, "global-ua");
+  std::string argFetchTimeout = getUrlArg(argument, "fetch_timeout");
+  if (!argFetchTimeout.empty())
+    global.fetch_timeout = stol(argFetchTimeout);
   // &global-ua= overrides the config file's user_agent setting
   if(!argGlobalUA.empty())
       global.user_agent = argGlobalUA;
@@ -985,8 +987,12 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   int interval = !argUpdateInterval.empty()
                      ? to_int(argUpdateInterval, global.updateInterval)
                      : global.updateInterval;
-  // Token authentication is permanently disabled for security
-  bool authorized = false, strict = !argUpdateStrict.empty()
+  bool authorized;
+  if (global.accessToken.empty())
+    authorized = true;
+  else
+    authorized = getUrlArg(argument, "token") == global.accessToken;
+  bool strict = !argUpdateStrict.empty()
                                         ? argUpdateStrict == "true"
                                         : global.updateStrict;
 
@@ -1095,8 +1101,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   ext.quanx_dev_id = !argDeviceID.empty() ? argDeviceID : global.quanXDevID;
   ext.enable_rule_generator = global.enableRuleGen;
   ext.overwrite_original_rules = global.overwriteOriginalRules;
-  if (!argExpandRulesets)
-    ext.managed_config_prefix = global.managedConfigPrefix;
+  ext.managed_config_prefix = global.managedConfigPrefix;
 
   /// load external configuration
   std::string userProvidedConfig = getUrlArg(argument, "config");
@@ -2320,7 +2325,7 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS) {
   std::string name = getUrlArg(argument, "name"),
               token = getUrlArg(argument, "token");
   string_array profiles = split(name, "|");
-  if (token.empty() || profiles.empty()) {
+  if (token != global.accessToken || profiles.empty()) {
     *status_code = 403;
     return "Forbidden: missing profile name or access token.\n"
            "禁止访问：缺少配置名称或访问令牌。";
@@ -2407,7 +2412,7 @@ std::string getProfile(RESPONSE_CALLBACK_ARGS) {
     iter->second = all_urls;
   }
 
-  contents.emplace("token", token);
+  contents.emplace("token", token.empty() ? global.accessToken : token);
   contents.emplace("profile_data",
                    base64Encode(global.managedConfigPrefix + "/getprofile?" +
                                 joinArguments(argument)));
@@ -2511,7 +2516,6 @@ int simpleGenerator() {
       }
     }
     sections = new_targets;
-    sections.shrink_to_fit();
   } else
     // std::cerr<<"Generating all artifacts...\n";
     writeLog(0, "正在生成所有生成项...", LOG_LEVEL_INFO);

@@ -6,7 +6,6 @@
 template <typename T> inline void eraseElements(std::vector<T> &target)
 {
     target.clear();
-    target.shrink_to_fit();
 }
 
 template <typename T> inline void eraseElements(T &target)

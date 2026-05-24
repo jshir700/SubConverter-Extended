@@ -3268,16 +3268,19 @@ void explode(const std::string &link, Proxy &node) {
         explodeHTTPSub(link, node);
 }
 
-void explodeSub(std::string sub, std::vector<Proxy> &nodes) {
+void explodeSub(const std::string &sub_in, std::vector<Proxy> &nodes) {
     std::stringstream strstream;
     std::string strLink;
     bool processed = false;
 
     //try to parse as SSD configuration
-    if (startsWith(sub, "ssd://")) {
-        explodeSSD(sub, nodes);
+    if (startsWith(sub_in, "ssd://")) {
+        explodeSSD(sub_in, nodes);
         processed = true;
     }
+
+    // explicitly copy for mutable operations in non-SSD path
+    std::string sub = sub_in;
 
     //try to parse as clash configuration
     try {
