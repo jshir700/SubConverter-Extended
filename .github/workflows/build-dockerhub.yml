@@ -661,29 +661,29 @@ jobs:
 
           cat >> release-notes.md <<'EOF'
 
-          ## Docker Images
+          ## Docker Images / Docker 镜像
 
-          Docker images are published to:
+          Docker images are published to / 镜像发布至:
           - `jshir700/subconverter-extended`
 
-          Supported Docker platforms:
+          Supported Docker platforms / 支持的 Docker 平台:
           - `linux/amd64`
           - `linux/arm64`
           - `linux/arm/v7`
 
-          ## Downloads
+          ## Downloads / 下载
 
-          ### Linux (portable, glibc runtime bundled)
+          ### Linux (portable, glibc runtime bundled) / Linux 便携版
           - **amd64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz`
           - **arm64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-arm64.tar.gz`
           - **armv7**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-armv7.tar.gz`
 
-          ### Windows (portable)
+          ### Windows (portable) / Windows 便携版
           - **amd64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-windows-amd64.zip`
 
-          ### OpenWrt 25.12+ APK (unsigned)
-          Install with `apk add --allow-untrusted ./<package>.apk`. Choose the APK whose OpenWrt architecture suffix matches `apk print-arch`.
-          User configuration is created at `/etc/subconverter/pref.toml` on first start and is not overwritten by upgrades.
+          ### OpenWrt 25.12+ APK (unsigned) / OpenWrt 25.12+ APK（未签名）
+          Install with / 安装命令: `apk add --allow-untrusted ./<package>.apk`. Choose the APK whose OpenWrt architecture suffix matches `apk print-arch` / 选择与 `apk print-arch` 输出匹配的 APK。
+          User configuration is created at / 首次启动时在 `/etc/subconverter/pref.toml` 创建用户配置，升级时不会被覆盖。
           - **x86_64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-x86_64.apk`
           - **aarch64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-aarch64_generic.apk`, `...-aarch64_cortex-a53.apk`, `...-aarch64_cortex-a72.apk`
           - **armv7**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-arm_cortex-*.apk`
