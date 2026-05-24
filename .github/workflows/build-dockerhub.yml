@@ -7,7 +7,7 @@ on:
       - completed
   push:
     branches:
-      - dev
+      - master
     tags:
       - 'v*.*.*'
     paths-ignore:
@@ -19,7 +19,6 @@ on:
   pull_request:
     branches:
       - master
-      - dev
   workflow_dispatch: {}
   schedule:
     - cron: '0 19 * * 0'
@@ -36,8 +35,8 @@ jobs:
   prepare:
     name: "🔧 Prepare Metadata"
     runs-on: ubuntu-latest
-    # Skip if [skip ci]; schedule only runs on master; workflow_run only runs on success for master/dev
-    if: "github.actor != 'dependabot[bot]' && !contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master') && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.head_branch == 'master' || github.event.workflow_run.head_branch == 'dev')))"
+    # Skip if [skip ci]; schedule only runs on master; workflow_run only runs on success for master
+    if: "github.actor != 'dependabot[bot]' && !contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master') && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master'))"
     outputs:
       sha_short: ${{ steps.vars.outputs.sha_short }}
       version: ${{ steps.version.outputs.version }}
@@ -112,9 +111,9 @@ jobs:
             echo "is_release=true" >> $GITHUB_OUTPUT
             echo "Master branch build (manual/schedule): $VERSION"
           else
-            echo "version=dev" >> $GITHUB_OUTPUT
+            echo "version=latest" >> $GITHUB_OUTPUT
             echo "is_release=false" >> $GITHUB_OUTPUT
-            echo "Using dev version"
+            echo "Using latest version"
           fi
 
       - name: Set build date
@@ -152,7 +151,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ steps.version.outputs.is_release == 'true' }}
             type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.is_release == 'true' }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=master,enable=${{ github.ref == 'refs/heads/master' && steps.version.outputs.is_release != 'true' }}
 
   build-linux:
     name: "🐳 Docker Build (${{ matrix.arch }})"
@@ -191,10 +190,10 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           BUILD_DATE: ${{ needs.prepare.outputs.build_date }}
           MIHOMO_REF: Meta
-          MIHOMO_CACHE_BUST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && matrix.extract_generated == 'true' && github.run_id || 'stable' }}
+          MIHOMO_CACHE_BUST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.extract_generated == 'true' && github.run_id || 'stable' }}
           SOURCE_DEPS_CACHE_BUST: ${{ github.event_name != 'pull_request' && github.run_id || 'stable' }}
-          REFRESH_GO_DEPS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && matrix.extract_generated == 'true' }}
-          REFRESH_HEADERS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && matrix.extract_generated == 'true' }}
+          REFRESH_GO_DEPS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.extract_generated == 'true' }}
+          REFRESH_HEADERS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.extract_generated == 'true' }}
         run: |
           {
             echo 'args<<EOF'
@@ -275,11 +274,11 @@ jobs:
           fi
 
       - name: Commit and push generated files
-        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
         shell: bash
         run: |
-          BRANCH_NAME="dev"
-          echo "Dev branch build, pushing generated files to: $BRANCH_NAME"
+          BRANCH_NAME="master"
+          echo "Master branch build, pushing generated files to: $BRANCH_NAME"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -290,11 +289,11 @@ jobs:
           git rebase "origin/$BRANCH_NAME"
           git push origin "HEAD:refs/heads/$BRANCH_NAME"
 
-      - name: Report generated file changes outside dev
-        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
+      - name: Report generated file changes outside master
+        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref != 'refs/heads/master'
         shell: bash
         run: |
-          echo "::warning::Generated file changes were detected on ${GITHUB_REF}, but source updates are committed only to dev."
+          echo "::warning::Generated file changes were detected on ${GITHUB_REF}, but source updates are committed only to master."
 
       - name: Build and push final image
         id: build_image

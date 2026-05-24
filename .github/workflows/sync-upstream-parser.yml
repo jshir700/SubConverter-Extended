@@ -25,13 +25,13 @@ permissions:
   issues: write
 
 concurrency:
-  group: sync-upstream-parser-dev
+  group: sync-upstream-parser-master
   cancel-in-progress: false
 
 env:
   # Scheduled workflows are read from the default branch, but parser syncs
-  # must be planned, tested, and committed on dev.
-  TARGET_BRANCH: dev
+  # must be planned, tested, and committed on master.
+  TARGET_BRANCH: master
   UPSTREAM_REPO: https://github.com/asdlokj1qpi233/subconverter.git
   UPSTREAM_BRANCH: master
   SYNC_DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
@@ -42,7 +42,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout dev
+      - name: Checkout master
         uses: actions/checkout@v6
         with:
           ref: ${{ env.TARGET_BRANCH }}
@@ -308,7 +308,7 @@ jobs:
           curl -fsS "$BASE_URL/sub?target=surge&url=ss%3A%2F%2FY2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwYXNzd29yZA%40www.example.com%3A1080%23Example" > /tmp/surge.conf
           test -s /tmp/surge.conf
 
-      - name: Commit sync result to dev
+      - name: Commit sync result to master
         if: steps.changes.outputs.has_changes == 'true'
         run: |
           set -euo pipefail

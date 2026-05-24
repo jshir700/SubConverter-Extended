@@ -9,12 +9,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: watch-mihomo-meta-dev
+  group: watch-mihomo-meta-master
   cancel-in-progress: false
 
 env:
-  # Scheduled workflows run from the default branch, but the marker belongs to dev.
-  TARGET_BRANCH: dev
+  # Scheduled workflows run from the default branch.
+  TARGET_BRANCH: master
   MIHOMO_REPO: https://github.com/MetaCubeX/mihomo.git
   MARKER_FILE: .github/mihomo-meta.rev
 
