@@ -112,6 +112,7 @@ COPY --from=go-builder /build/bridge/go.sum /src/bridge/go.sum
 
 # build SubConverter-Extended from THIS repository source
 WORKDIR /src
+ARG CACHE_BUST=0
 COPY . /src
 COPY --from=go-builder /build/bridge/mihomo_schemes.h /src/src/parser/mihomo_schemes.h
 COPY --from=go-builder /build/bridge/param_compat.h /src/src/parser/param_compat.h
