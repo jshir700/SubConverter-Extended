@@ -396,7 +396,8 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
     // Per-rule param override with fallback to global
     std::string ua = x.UserAgent.empty() ? rules_ua : x.UserAgent;
     std::string rule_proxy = x.Proxy.empty() ? rules_proxy : x.Proxy;
-    std::string interval_str = x.Interval > 0 ? std::to_string(x.Interval) : rules_interval;
+    int effective_interval = x.Interval > 0 ? x.Interval
+        : to_int(rules_interval, 43200);
 
     std::string::size_type pos = x.Url.find("[]");
     if (pos != std::string::npos) {
@@ -410,7 +411,7 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
             RULESET_SURGE,
             std::async(std::launch::async,
                        [=]() { return rule_url.substr(pos); }),
-            0,
+            effective_interval,
             ua,
             rule_proxy,
             !x.Provider,
@@ -436,7 +437,7 @@ void refreshRulesets(RulesetConfigs &ruleset_list,
             type,
             fetchFileAsync(rule_url, proxy, global.cacheRuleset, true,
                            global.asyncFetchRuleset, ua, context),
-            x.Interval,
+            effective_interval,
             ua,
             rule_proxy,
             !x.Provider,
@@ -460,7 +461,7 @@ void readYAMLConf(YAML::Node &node) {
     if (tempArray.size()) {
       strLine = std::accumulate(std::next(tempArray.begin()), tempArray.end(),
                                 tempArray[0], [](std::string a, std::string b) {
-                                  return std::move(a) + "|" + std::move(b);
+                                  return std::move(a) + "||" + std::move(b);
                                 });
       global.defaultUrls = strLine;
       eraseElements(tempArray);
@@ -472,7 +473,7 @@ void readYAMLConf(YAML::Node &node) {
     if (tempArray.size()) {
       strLine = std::accumulate(std::next(tempArray.begin()), tempArray.end(),
                                 tempArray[0], [](std::string a, std::string b) {
-                                  return std::move(a) + "|" + std::move(b);
+                                  return std::move(a) + "||" + std::move(b);
                                 });
       global.insertUrls = strLine;
       eraseElements(tempArray);
@@ -754,8 +755,8 @@ void readTOMLConf(toml::value &root) {
 
   find_if_exist(section_common, "default_url", default_url, "insert_url",
                 insert_url);
-  global.defaultUrls = join(default_url, "|");
-  global.insertUrls = join(insert_url, "|");
+  global.defaultUrls = join(default_url, "||");
+  global.insertUrls = join(insert_url, "||");
 
   bool filter = false;
   // api_mode and api_access_token read from YAML common section

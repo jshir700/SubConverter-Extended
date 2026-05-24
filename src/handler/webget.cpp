@@ -488,6 +488,9 @@ static inline void curl_set_common_options(CURL *curl_handle, const char *url, c
 // Thread-local CURL handle pool for connection reuse.
 // Each thread gets its own persistent handle, avoiding curl_easy_init/cleanup
 // overhead and allowing TCP/TLS connection reuse across requests.
+// NOTE: Do NOT call curl_easy_cleanup on this handle. Use curl_easy_reset
+// instead (done automatically in get_thread_local_curl_handle on reuse).
+// The handle lives for the lifetime of the thread.
 static CURL* get_thread_local_curl_handle()
 {
     thread_local CURL* handle = nullptr;
@@ -637,7 +640,7 @@ static int curlGet(const FetchArgument &argument, FetchResult &result, CURLcode 
         curl_slist_free_all(cookies);
     }
 
-    curl_easy_cleanup(curl_handle);
+    curl_easy_reset(curl_handle);
 
     if(data && !argument.keep_resp_on_fail)
     {

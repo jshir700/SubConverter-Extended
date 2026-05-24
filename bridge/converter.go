@@ -6,6 +6,7 @@ package main
 import "C"
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
 	"unsafe"
@@ -44,7 +45,17 @@ func preprocessSubscription(subscription string) string {
 // ConvertSubscription converts V2Ray subscription links to mihomo proxy configs
 //
 //export ConvertSubscription
-func ConvertSubscription(data *C.char) *C.char {
+func ConvertSubscription(data *C.char) (result *C.char) {
+	// Recover from panics in mihomo library to prevent crashing the entire process
+	defer func() {
+		if r := recover(); r != nil {
+			errJSON, _ := json.Marshal(map[string]string{
+				"error": "mihomo parser panic: " + fmt.Sprint(r),
+			})
+			result = C.CString(string(errJSON))
+		}
+	}()
+
 	if data == nil {
 		return C.CString(`{"error": "null input"}`)
 	}
@@ -65,7 +76,7 @@ func ConvertSubscription(data *C.char) *C.char {
 	}
 
 	// Marshal result to JSON
-	result, err := json.Marshal(proxies)
+	marshaled, err := json.Marshal(proxies)
 	if err != nil {
 		errJSON, _ := json.Marshal(map[string]string{
 			"error": "failed to marshal result: " + err.Error(),
@@ -73,7 +84,7 @@ func ConvertSubscription(data *C.char) *C.char {
 		return C.CString(string(errJSON))
 	}
 
-	return C.CString(string(result))
+	return C.CString(string(marshaled))
 }
 
 // FreeString frees memory allocated by Go (must be called from C++ after using the result)
