@@ -477,6 +477,21 @@ static inline void curl_set_common_options(CURL *curl_handle, const char *url, c
     }
 }
 
+// Thread-local CURL handle pool for connection reuse.
+// Each thread gets its own persistent handle, avoiding curl_easy_init/cleanup
+// overhead and allowing TCP/TLS connection reuse across requests.
+static CURL* get_thread_local_curl_handle()
+{
+    thread_local CURL* handle = nullptr;
+    if (!handle) {
+        curl_init();
+        handle = curl_easy_init();
+    } else {
+        curl_easy_reset(handle);
+    }
+    return handle;
+}
+
 //static std::string curlGet(const std::string &url, const std::string &proxy, std::string &response_headers, CURLcode &return_code, const string_map &request_headers)
 static int curlGet(const FetchArgument &argument, FetchResult &result, CURLcode *return_code = nullptr)
 {

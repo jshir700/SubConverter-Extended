@@ -19,7 +19,7 @@
 #include "templates.h"
 
 // 在 ruleconvert.cpp 中定义的全局规则类型白名单
-extern string_array ClashRuleTypes;
+extern const string_array ClashRuleTypes;
 
 static thread_local FetchContext current_template_fetch_context =
     FetchContext::TrustedConfig;

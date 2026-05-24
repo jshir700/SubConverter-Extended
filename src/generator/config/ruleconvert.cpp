@@ -161,6 +161,35 @@ std::string getRuleKey(const std::string &rule) {
     return result;
 }
 
+static bool isClashCommaPayloadRule(const std::string &rule_type)
+{
+    return rule_type == "AND" || rule_type == "OR" || rule_type == "NOT" ||
+           rule_type == "SUB-RULE" || rule_type == "DOMAIN-REGEX" ||
+           rule_type == "PROCESS-NAME-REGEX" || rule_type == "PROCESS-PATH-REGEX";
+}
+
+std::string appendClashRuleTarget(const std::string &rule, const std::string &target, bool no_resolve_only)
+{
+    std::string strLine = trimWhitespace(rule, true, true);
+    std::string::size_type pos = strLine.find(',');
+    std::string rule_type = toUpper(trimWhitespace(pos == std::string::npos ? strLine : strLine.substr(0, pos), true, true));
+    if(rule_type == "FINAL" || rule_type == "MATCH")
+        return "MATCH," + target;
+    if(pos == std::string::npos || isClashCommaPayloadRule(rule_type))
+        return strLine + "," + target;
+    string_view_array temp;
+    split(temp, strLine, ',');
+    if(temp.size() < 2)
+        return strLine + "," + target;
+    std::string output = std::string(temp[0]) + "," + std::string(temp[1]) + "," + target;
+    if(temp.size() > 2) {
+        std::string option = trimWhitespace(std::string(temp[2]), true, true);
+        if(!no_resolve_only || option == "no-resolve")
+            output += "," + option;
+    }
+    return output;
+}
+
 static std::string transformRuleToCommon(string_view_array &temp, const std::string &input, const std::string &group, bool no_resolve_only = false)
 {
     temp.clear();
