@@ -292,7 +292,7 @@ bool applyMatcher(const std::string &rule, std::string &real_rule,
   return true;
 }
 
-void processRemark(std::string &remark, const std::unordered_set<std::string> &remarks_list,
+void processRemark(std::string &remark, const string_array &remarks_list,
                    bool proc_comma = true) {
   // Replace every '=' with '-' in the remark string to avoid parse errors from
   // the clients.
