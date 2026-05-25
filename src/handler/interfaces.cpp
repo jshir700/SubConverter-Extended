@@ -171,6 +171,7 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
               group = urlSafeBase64Decode(getUrlArg(argument, "group"));
   std::string output_content, dummy;
   int type_int = to_int(type, 0);
+  tribool argDedup = getUrlArg(argument, "dedup");
 
   if (url.empty() || type.empty() || (type_int == 2 && group.empty()) ||
       (type_int < 1 || type_int > 6)) {
@@ -225,6 +226,7 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
     return 0;
   };
 
+  std::unordered_set<std::string> seenRulesExact;
   lineSize = output_content.size();
   output_content.clear();
   output_content.reserve(lineSize);
@@ -233,6 +235,8 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
     output_content = "payload:\n";
 
   while (getline(ss, strLine, delimiter)) {
+    if (!strLine.empty() && strLine.back() == '\r')
+      strLine.pop_back();
     if (strFind(strLine, "//")) {
       strLine.erase(strLine.find("//"));
       strLine = trimWhitespace(strLine);
@@ -244,6 +248,31 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
                          return startsWith(strLine, type);
                        }))
         continue;
+      {
+        string_size dpos = strLine.find(',');
+        if (dpos != std::string::npos) {
+          std::string rule_type = strLine.substr(0, dpos);
+          std::string key;
+          string_size dpos2 = strLine.find(',', dpos + 1);
+          if (dpos2 == std::string::npos) {
+            key = rule_type + "," + strLine.substr(dpos + 1);
+          } else {
+            std::string value = strLine.substr(dpos + 1, dpos2 - dpos - 1);
+            if (rule_type == "IP-CIDR" || rule_type == "IP-CIDR6") {
+              if (strLine.find(",no-resolve") != std::string::npos)
+                key = rule_type + "," + value + ",no-resolve";
+              else
+                key = rule_type + "," + value;
+            } else {
+              key = rule_type + "," + value;
+            }
+          }
+          if (argDedup.get(true)) {
+            if (!seenRulesExact.emplace(key).second)
+              continue;
+          }
+        }
+      }
       break;
     case 1:
       if (!std::any_of(SurgeRuleTypes.begin(), SurgeRuleTypes.end(),
@@ -251,37 +280,105 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
                          return startsWith(strLine, type);
                        }))
         continue;
+      {
+        string_size dpos = strLine.find(',');
+        if (dpos != std::string::npos) {
+          std::string rule_type = strLine.substr(0, dpos);
+          std::string key;
+          string_size dpos2 = strLine.find(',', dpos + 1);
+          if (dpos2 == std::string::npos) {
+            key = rule_type + "," + strLine.substr(dpos + 1);
+          } else {
+            std::string value = strLine.substr(dpos + 1, dpos2 - dpos - 1);
+            if (rule_type == "IP-CIDR" || rule_type == "IP-CIDR6") {
+              if (strLine.find(",no-resolve") != std::string::npos)
+                key = rule_type + "," + value + ",no-resolve";
+              else
+                key = rule_type + "," + value;
+            } else {
+              key = rule_type + "," + value;
+            }
+          }
+          if (argDedup.get(true)) {
+            if (!seenRulesExact.emplace(key).second)
+              continue;
+          }
+        }
+      }
       break;
     case 3:
       if (!startsWith(strLine, "DOMAIN-SUFFIX,") &&
           !startsWith(strLine, "DOMAIN,"))
         continue;
+      {
+        string_size dpos = strLine.find(',');
+        if (dpos != std::string::npos) {
+          std::string rule_type = strLine.substr(0, dpos);
+          std::string key = rule_type + "," + strLine.substr(dpos + 1);
+          if (argDedup.get(true)) {
+            if (!seenRulesExact.emplace(key).second)
+              continue;
+          }
+        }
+      }
       if (filterLine())
         continue;
       output_content += "  - '";
       if (strLine[posb - 2] == 'X')
         output_content += "+.";
-      output_content += strLine.substr(posb, pose);
+      output_content += trim(strLine.substr(posb, pose));
       output_content += "'\n";
       continue;
     case 4:
       if (!startsWith(strLine, "IP-CIDR,") && !startsWith(strLine, "IP-CIDR6,"))
         continue;
+      {
+        string_size dpos = strLine.find(',');
+        if (dpos != std::string::npos) {
+          std::string rule_type = strLine.substr(0, dpos);
+          std::string key;
+          string_size dpos2 = strLine.find(',', dpos + 1);
+          if (dpos2 == std::string::npos) {
+            key = rule_type + "," + strLine.substr(dpos + 1);
+          } else {
+            std::string value = strLine.substr(dpos + 1, dpos2 - dpos - 1);
+            if (strLine.find(",no-resolve") != std::string::npos)
+              key = rule_type + "," + value + ",no-resolve";
+            else
+              key = rule_type + "," + value;
+          }
+          if (argDedup.get(true)) {
+            if (!seenRulesExact.emplace(key).second)
+              continue;
+          }
+        }
+      }
       if (filterLine())
         continue;
       output_content += "  - '";
-      output_content += strLine.substr(posb, pose);
+      output_content += trim(strLine.substr(posb, pose));
       output_content += "'\n";
       continue;
     case 5:
       if (!startsWith(strLine, "DOMAIN-SUFFIX,") &&
           !startsWith(strLine, "DOMAIN,"))
         continue;
+      {
+        string_size dpos = strLine.find(',');
+        if (dpos != std::string::npos) {
+          std::string rule_type = strLine.substr(0, dpos);
+          std::string key = rule_type + "," + strLine.substr(dpos + 1);
+          if (argDedup.get(true)) {
+            if (!seenRulesExact.emplace(key).second)
+              continue;
+          }
+        }
+      }
       if (filterLine())
         continue;
       if (strLine[posb - 2] == 'X')
         output_content += '.';
-      output_content += strLine.substr(posb, pose);
+      output_content += trim(strLine.substr(posb, pose));
       output_content += '\n';
       continue;
     case 6:
@@ -290,6 +387,37 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
                          return startsWith(strLine, type);
                        }))
         continue;
+      {
+        string_size dpos = strLine.find(',');
+        if (dpos != std::string::npos) {
+          std::string rule_type = strLine.substr(0, dpos);
+          std::string key;
+          string_size dpos2 = strLine.find(',', dpos + 1);
+          if (dpos2 == std::string::npos) {
+            key = rule_type + "," + strLine.substr(dpos + 1);
+          } else {
+            std::string value = strLine.substr(dpos + 1, dpos2 - dpos - 1);
+            if (rule_type == "IP-CIDR" || rule_type == "IP-CIDR6") {
+              if (strLine.find(",no-resolve") != std::string::npos)
+                key = rule_type + "," + value + ",no-resolve";
+              else
+                key = rule_type + "," + value;
+            } else if (rule_type == "AND" || rule_type == "OR" || rule_type == "NOT" || rule_type == "SUB-RULE") {
+              string_size last_comma = strLine.rfind(',');
+              if (last_comma != std::string::npos && last_comma > dpos2)
+                key = strLine.substr(0, last_comma);
+              else
+                key = rule_type + "," + value;
+            } else {
+              key = rule_type + "," + value;
+            }
+          }
+          if (argDedup.get(true)) {
+            if (!seenRulesExact.emplace(key).second)
+              continue;
+          }
+        }
+      }
       output_content += "  - ";
     default:
       break;

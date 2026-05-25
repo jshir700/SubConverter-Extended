@@ -468,6 +468,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
             }
             if(startsWith(strLine, "FINAL"))
                 strLine = "MATCH";
+            if(dedup) {
+                std::string key = getRuleKey(strLine);
+                if(!dedupKeys.emplace(key).second)
+                    continue;
+            }
             strLine = appendClashRuleTarget(strLine, rule_group);
             rules.emplace_back(std::move(strLine));
             continue;
