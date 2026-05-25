@@ -580,24 +580,12 @@ jobs:
           } > release-context.md
 
           {
-            echo "## English"
+            echo "## Changes / 变更"
             echo
-            echo "### Changes"
             if [ -s commits.md ]; then
               cat commits.md
             else
-              echo "- No commit summary was available."
-            fi
-            echo
-            echo "## 中文"
-            echo
-            echo "### 变更"
-            if [ -s commits.md ]; then
-              echo "本次发布包含以下提交："
-              echo
-              cat commits.md
-            else
-              echo "- 未获取到提交摘要。"
+              echo "- No commit summary was available. / 未获取到提交摘要。"
             fi
           } > release-notes.fallback.md
 
@@ -640,20 +628,10 @@ jobs:
 
           Required format:
 
-          ## English
-
-          ### Highlights
+          ## Highlights / 亮点
           - ...
 
-          ### Changes
-          - ...
-
-          ## 中文
-
-          ### 亮点
-          - ...
-
-          ### 变更
+          ## Changes / 变更
           - ...
 
           Omit empty sections. Keep each language concise and accurate.
