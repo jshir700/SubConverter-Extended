@@ -593,7 +593,7 @@ jobs:
             echo
             echo "### 变更"
             if [ -s commits.md ]; then
-              echo "本次发布包含以下提交（提交信息为中英双语）："
+              echo "本次发布包含以下提交："
               echo
               cat commits.md
             else
