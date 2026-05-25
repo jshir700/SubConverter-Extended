@@ -169,6 +169,8 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
   std::string url = urlSafeBase64Decode(getUrlArg(argument, "url")),
               type = getUrlArg(argument, "type"),
               group = urlSafeBase64Decode(getUrlArg(argument, "group"));
+  std::string argUserAgent = getUrlArg(argument, "ua"),
+              argFetchTimeout = getUrlArg(argument, "fetch_timeout");
   std::string output_content, dummy;
   int type_int = to_int(type, 0);
   tribool argDedup = getUrlArg(argument, "dedup");
@@ -182,16 +184,36 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
            "必须提供 url 和 type=1..6；当 type=2 时还必须提供 group。";
   }
 
+  long saved_timeout = global.fetch_timeout;
+  if (!argFetchTimeout.empty()) {
+    long ft = to_int(argFetchTimeout, 0);
+    if (ft > 0)
+      global.fetch_timeout = ft;
+  }
+
   string_array vArray = split(url, "|");
   for (std::string &x : vArray)
     x.insert(0, "ruleset,");
   std::vector<RulesetContent> rca;
   RulesetConfigs confs = INIBinding::from<RulesetConfig>::from_ini(vArray);
+
+  std::string effective_ua = argUserAgent;
+  if (effective_ua.empty() && request.headers.contains("User-Agent"))
+    effective_ua = request.headers.at("User-Agent");
+  if (!effective_ua.empty()) {
+    for (auto &cfg : confs) {
+      if (cfg.UserAgent.empty())
+        cfg.UserAgent = effective_ua;
+    }
+  }
+
   refreshRulesets(confs, rca, FetchContext::PublicRequest);
+
   for (RulesetContent &x : rca) {
     std::string content = x.rule_content.get();
     output_content += convertRuleset(content, x.rule_type);
   }
+  global.fetch_timeout = saved_timeout;
 
   if (output_content.empty()) {
     *status_code = 400;
