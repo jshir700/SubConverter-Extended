@@ -32,9 +32,9 @@ std::string page(Request &, Response &response) {
             document.documentElement.lang = languages.some(function (language) { return /^zh\b/i.test(language); }) ? "zh-CN" : "en";
         })();
     </script>
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-dark.svg">
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-light.svg" media="(prefers-color-scheme: light)">
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-dark.svg" media="(prefers-color-scheme: dark)">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-dark.svg">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-light.svg" media="(prefers-color-scheme: light)">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-dark.svg" media="(prefers-color-scheme: dark)">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -669,8 +669,8 @@ std::string page(Request &, Response &response) {
         <div class="topbar">
             <div class="brand">
                 <picture>
-                    <source media="(prefers-color-scheme: dark)" srcset="/version/favicon-dark.svg">
-                    <img src="/version/favicon-light.svg" alt="SubConverter-Extended" width="48" height="48" decoding="async">
+                    <source media="(prefers-color-scheme: dark)" srcset="version/favicon-dark.svg">
+                    <img src="version/favicon-light.svg" alt="SubConverter-Extended" width="48" height="48" decoding="async">
                 </picture>
                 <div>
                     <h1><span data-lang="en">SubConverter-Extended Dashboard</span><span data-lang="zh">SubConverter-Extended 仪表盘</span></h1>
@@ -1247,7 +1247,7 @@ std::string page(Request &, Response &response) {
                 renderMap();
             }
             async function refresh() {
-                var response = await fetch("/dashboard/data?_=" + Date.now(), { cache: "no-store", headers: { "Accept": "application/json" } });
+                var response = await fetch("dashboard/data?_=" + Date.now(), { cache: "no-store", headers: { "Accept": "application/json" } });
                 render(await response.json());
             }
             document.getElementById("lang-toggle").addEventListener("click", function () {

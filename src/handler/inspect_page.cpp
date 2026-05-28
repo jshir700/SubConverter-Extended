@@ -38,9 +38,9 @@ std::string page(Request &request, Response &response) {
             document.documentElement.lang = detectPreferredLanguage();
         })();
     </script>
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-dark.svg">
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-light.svg" media="(prefers-color-scheme: light)">
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-dark.svg" media="(prefers-color-scheme: dark)">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-dark.svg">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-light.svg" media="(prefers-color-scheme: light)">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-dark.svg" media="(prefers-color-scheme: dark)">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -763,8 +763,8 @@ std::string page(Request &request, Response &response) {
     <main class="container">
         <header>
             <picture class="brand-mark">
-                <source media="(prefers-color-scheme: dark)" srcset="/version/favicon-dark.svg">
-                <img src="/version/favicon-light.svg" alt="SubConverter-Extended icon" width="88" height="88" decoding="async">
+                <source media="(prefers-color-scheme: dark)" srcset="version/favicon-dark.svg">
+                <img src="version/favicon-light.svg" alt="SubConverter-Extended icon" width="88" height="88" decoding="async">
             </picture>
             <div class="status-pill">
                 <span class="status-dot"></span>
@@ -943,10 +943,10 @@ std::string page(Request &request, Response &response) {
         <footer>
             <span data-lang="en">SubConverter-Extended )html" +
          std::string(VERSION) +
-         R"html( · <a href="/version">Version</a></span>
+         R"html( · <a href="version">Version</a></span>
             <span data-lang="zh">SubConverter-Extended )html" +
          std::string(VERSION) +
-         R"html( · <a href="/version">版本信息</a></span>
+         R"html( · <a href="version">版本信息</a></span>
         </footer>
     </main>
 
@@ -1193,23 +1193,24 @@ std::string page(Request &request, Response &response) {
                 return (value / 1024 / 1024).toFixed(1) + " MB";
             }
 
+            var _subPath = new URL("../sub", window.location.href).pathname;
             function normalizeRequest(raw) {
                 var value = (raw || "").trim();
                 var url;
                 if (!value) {
-                    url = new URL("/sub", window.location.origin);
+                    url = new URL("../sub", window.location.href);
                 } else if (value.charAt(0) === "?") {
-                    url = new URL("/sub" + value, window.location.origin);
+                    url = new URL("../sub" + value, window.location.href);
                 } else if (value.charAt(0) === "/") {
                     url = new URL(value, window.location.origin);
                 } else if (/^https?:\/\//i.test(value)) {
                     url = new URL(value);
                 } else {
-                    url = new URL("/sub?" + value, window.location.origin);
+                    url = new URL("../sub?" + value, window.location.href);
                 }
 
-                if (url.pathname !== "/sub") {
-                    url.pathname = "/sub";
+                if (url.pathname !== _subPath) {
+                    url.pathname = _subPath;
                 }
                 url.searchParams.set("explain", "true");
                 return url;

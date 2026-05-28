@@ -136,9 +136,9 @@ std::string page(Request &, Response &response) {
             document.documentElement.lang = detectPreferredLanguage();
         })();
     </script>
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-dark.svg">
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-light.svg" media="(prefers-color-scheme: light)">
-    <link rel="icon" type="image/svg+xml" href="/version/favicon-dark.svg" media="(prefers-color-scheme: dark)">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-dark.svg">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-light.svg" media="(prefers-color-scheme: light)">
+    <link rel="icon" type="image/svg+xml" href="version/favicon-dark.svg" media="(prefers-color-scheme: dark)">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -696,8 +696,8 @@ std::string page(Request &, Response &response) {
     <div class="container">
         <header>
             <picture class="brand-mark">
-                <source media="(prefers-color-scheme: dark)" srcset="/version/favicon-dark.svg">
-                <img src="/version/favicon-light.svg" alt="SubConverter-Extended icon" width="96" height="96" decoding="async">
+                <source media="(prefers-color-scheme: dark)" srcset="version/favicon-dark.svg">
+                <img src="version/favicon-light.svg" alt="SubConverter-Extended icon" width="96" height="96" decoding="async">
             </picture>
             <div class="status-pill" aria-live="polite">
                 <span class="status-dot" aria-hidden="true"></span>
