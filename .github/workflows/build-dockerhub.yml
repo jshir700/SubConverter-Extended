@@ -180,7 +180,8 @@ jobs:
             fi
             if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
               printf '%s\n' \
-                "jshir700/subconverter-extended:master"
+                "jshir700/subconverter-extended:master" \
+                "jshir700/subconverter-extended:latest"
             fi
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
