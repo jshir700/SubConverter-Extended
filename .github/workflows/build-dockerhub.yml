@@ -27,6 +27,10 @@ on:
         required: false
         default: false
         type: boolean
+  workflow_run:
+    workflows: ["CodeQL"]
+    types:
+      - completed
   schedule:
     - cron: '0 19 * * 0'
 
@@ -42,7 +46,12 @@ jobs:
   prepare:
     name: "🔧 Prepare Metadata"
     runs-on: ubuntu-latest
-    if: github.actor != 'dependabot[bot]' && !contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master')
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, '[ci skip]') &&
+      (github.event_name != 'schedule' || github.ref == 'refs/heads/master') &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     outputs:
       sha_short: ${{ steps.vars.outputs.sha_short }}
       version: ${{ steps.version.outputs.version }}
@@ -56,6 +65,26 @@ jobs:
         with:
           token: ${{ secrets.PAT_TOKEN || github.token }}
           fetch-depth: 0
+
+      - name: Checkout exact commit for workflow_run
+        if: github.event_name == 'workflow_run'
+        run: git checkout ${{ github.event.workflow_run.head_sha }}
+
+      - name: Check for Docker-relevant changes (workflow_run only)
+        id: check_docker_changes
+        if: github.event_name == 'workflow_run'
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          echo "Changed files: $CHANGED_FILES"
+          if echo "$CHANGED_FILES" | tr ' ' '\n' | grep -qE '^(src/|CMakeLists\.txt|Dockerfile|bridge/|\.github/workflows/build-dockerhub\.yml)'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip if no Docker-relevant changes (workflow_run)
+        if: steps.check_docker_changes.outputs.changed == 'false'
+        run: echo "No Docker-relevant changes, skipping build." && exit 0
 
       - name: Get short SHA
         id: vars
