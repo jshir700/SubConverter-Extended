@@ -1,20 +1,32 @@
 name: Build and Push Docker image
 
 on:
-  workflow_run:
-    workflows: ["CodeQL"]
-    types:
-      - completed
-  pull_request:
+  push:
     branches:
-      - master
+      - dev
+    tags:
+      - 'v*.*.*'
     paths-ignore:
       - 'README.md'
       - 'README-*.md'
       - 'docker-compose.yml'
       - '.github/workflows/**'
       - '!.github/workflows/build-dockerhub.yml'
-  workflow_dispatch: {}
+  pull_request:
+    branches:
+      - master
+      - dev
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to rebuild, e.g. v1.2.3"
+        required: false
+        type: string
+      overwrite_existing_release:
+        description: "Overwrite assets/body of an existing GitHub Release"
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: '0 19 * * 0'
 
@@ -30,43 +42,20 @@ jobs:
   prepare:
     name: "🔧 Prepare Metadata"
     runs-on: ubuntu-latest
-    # Dependabot PRs are auto-merged; workflow_run only proceeds on CodeQL success
-    # from push events (excludes PR CodeQL runs); schedule only runs on master.
-    if: "github.actor != 'dependabot[bot]' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')) && (github.event_name != 'schedule' || github.ref == 'refs/heads/master')"
+    if: github.actor != 'dependabot[bot]' && !contains(github.event.head_commit.message, '[skip ci]') && !contains(github.event.head_commit.message, '[ci skip]') && (github.event_name != 'schedule' || github.ref == 'refs/heads/master')
     outputs:
       sha_short: ${{ steps.vars.outputs.sha_short }}
       version: ${{ steps.version.outputs.version }}
       is_release: ${{ steps.version.outputs.is_release }}
-      apk_built: ${{ steps.version.outputs.apk_built }}
-      is_tag: ${{ steps.version.outputs.is_tag }}
       tags: ${{ steps.meta.outputs.tags }}
       build_date: ${{ steps.build_date.outputs.build_date }}
       linux_matrix: ${{ steps.linux_matrix.outputs.matrix }}
-      docker_changed: ${{ steps.final_docker_changes.outputs.changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PAT_TOKEN || github.token }}
           fetch-depth: 0
-
-      - name: Checkout exact commit for workflow_run
-        if: github.event_name == 'workflow_run'
-        run: git checkout ${{ github.event.workflow_run.head_sha }}
-
-      - name: Check for Docker-relevant changes (workflow_run only)
-        id: check_docker_changes
-        if: github.event_name == 'workflow_run'
-        run: |
-          # Use diff-tree to correctly handle merge commits (shows all changed files
-          # from both parents, not just against the first parent).
-          CHANGED_FILES=$(git diff-tree --no-commit-id --diff-filter=ACDMR -r HEAD --name-only 2>/dev/null || echo "")
-          echo "Changed files: $CHANGED_FILES"
-          if echo "$CHANGED_FILES" | grep -qE '^(src/|CMakeLists\.txt|Dockerfile|bridge/|\.github/workflows/build-dockerhub\.yml)'; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "changed=false" >> $GITHUB_OUTPUT
-          fi
 
       - name: Get short SHA
         id: vars
@@ -74,31 +63,45 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          DISPATCH_RELEASE_TAG: ${{ inputs.release_tag }}
+          OVERWRITE_EXISTING_RELEASE: ${{ inputs.overwrite_existing_release }}
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            # Check if HEAD has a semver tag (tag push via CodeQL gate).
-            CURRENT_TAG=$(git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || echo "")
-            if [ -n "$CURRENT_TAG" ]; then
-              VERSION="$CURRENT_TAG"
-              echo "is_tag=true" >> $GITHUB_OUTPUT
-              echo "Detected tag on HEAD: $VERSION"
-            else
-              # No tag → master push via CodeQL gate.
-              echo "is_tag=false" >> $GITHUB_OUTPUT
-              LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-              if [ -n "$LATEST_TAG" ]; then
-                VERSION="$LATEST_TAG"
-                echo "Detected latest tag: $VERSION"
-              else
-                VERSION="latest"
-                echo "No tags found, using 'latest' as version"
-              fi
-            fi
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "is_release=true" >> $GITHUB_OUTPUT
-            echo "CodeQL gate build: $VERSION"
+            echo "Detected version from tag: $VERSION"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "$OVERWRITE_EXISTING_RELEASE" == "true" ]]; then
+            git fetch --tags --force origin
+
+            VERSION="${DISPATCH_RELEASE_TAG:-}"
+            VERSION="${VERSION#"${VERSION%%[![:space:]]*}"}"
+            VERSION="${VERSION%"${VERSION##*[![:space:]]}"}"
+
+            if [[ "$VERSION" != v* ]]; then
+              VERSION="v$VERSION"
+            fi
+
+            if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid release tag '$VERSION'. Use vX.Y.Z, for example v1.2.3."
+              exit 1
+            fi
+
+            if ! git ls-remote --exit-code --tags origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+              echo "::error::Tag '$VERSION' does not exist on origin."
+              exit 1
+            fi
+
+            TAG_COMMIT="$(git rev-list -n 1 "$VERSION")"
+            MASTER_COMMIT="$(git rev-parse HEAD)"
+            echo "Overwrite release tag: $VERSION"
+            echo "Tag commit: $TAG_COMMIT"
+            echo "Master commit used for rebuilt assets: $MASTER_COMMIT"
+
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_release=true" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" == refs/heads/master ]] && ([[ "${{ github.event_name }}" == "workflow_dispatch" ]] || [[ "${{ github.event_name }}" == "schedule" ]]); then
-            echo "is_tag=false" >> $GITHUB_OUTPUT
             LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
             if [ -n "$LATEST_TAG" ]; then
               VERSION="$LATEST_TAG"
@@ -111,31 +114,9 @@ jobs:
             echo "is_release=true" >> $GITHUB_OUTPUT
             echo "Master branch build (manual/schedule): $VERSION"
           else
-            echo "version=latest" >> $GITHUB_OUTPUT
+            echo "version=dev" >> $GITHUB_OUTPUT
             echo "is_release=false" >> $GITHUB_OUTPUT
-            echo "is_tag=false" >> $GITHUB_OUTPUT
-            echo "Using latest version"
-          fi
-
-          # Signal whether APK was built (only semver versions produce APKs).
-          if [[ "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "apk_built=true" >> $GITHUB_OUTPUT
-          else
-            echo "apk_built=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Finalize Docker-relevant changes
-        id: final_docker_changes
-        if: github.event_name == 'workflow_run'
-        run: |
-          # Always build for tag pushes. Otherwise, only build when
-          # Docker-relevant files changed.
-          if [[ "${{ steps.version.outputs.is_tag }}" == "true" ]]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Tag push, forcing Docker build"
-          else
-            echo "changed=${{ steps.check_docker_changes.outputs.changed }}" >> $GITHUB_OUTPUT
-            echo "Docker-relevant changes: ${{ steps.check_docker_changes.outputs.changed }}"
+            echo "Using dev version"
           fi
 
       - name: Set build date
@@ -166,20 +147,32 @@ jobs:
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
-        with:
-          images: |
-            jshir700/subconverter-extended
-          tags: |
-            type=raw,value=latest,enable=${{ steps.version.outputs.is_release == 'true' }}
-            type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.is_release == 'true' }}
-            type=raw,value=master,enable=${{ github.ref == 'refs/heads/master' && steps.version.outputs.is_release != 'true' }}
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IS_RELEASE: ${{ steps.version.outputs.is_release }}
+        run: |
+          {
+            echo 'tags<<EOF'
+            if [ "$IS_RELEASE" = "true" ]; then
+              printf '%s\n' \
+                "aethersailor/subconverter-extended:latest" \
+                "aethersailor/subconverter-extended:${VERSION}" \
+                "ghcr.io/aethersailor/subconverter-extended:latest" \
+                "ghcr.io/aethersailor/subconverter-extended:${VERSION}"
+            fi
+            if [ "${GITHUB_REF}" = "refs/heads/dev" ]; then
+              printf '%s\n' \
+                "aethersailor/subconverter-extended:dev" \
+                "ghcr.io/aethersailor/subconverter-extended:dev"
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
   build-linux:
     name: "🐳 Docker Build (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
     needs: prepare
-    if: needs.prepare.outputs.docker_changed != 'false'
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.linux_matrix) }}
@@ -187,22 +180,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.event_name == 'pull_request' && github.token || secrets.PAT_TOKEN }}
           fetch-depth: 0
 
-      - name: Checkout exact commit for workflow_run
-        if: github.event_name == 'workflow_run'
-        run: git checkout ${{ github.event.workflow_run.head_sha }}
-
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+        shell: bash
+        run: |
+          docker buildx create --name sce-builder --driver docker-container --use
+          docker buildx inspect --bootstrap
 
       - name: Log in to Docker Hub
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
 
       - name: Prepare Docker build args
         id: docker_args
@@ -213,10 +214,10 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           BUILD_DATE: ${{ needs.prepare.outputs.build_date }}
           MIHOMO_REF: Meta
-          MIHOMO_CACHE_BUST: ${{ (github.event_name == 'push' || github.event_name == 'workflow_run') && github.ref == 'refs/heads/master' && matrix.extract_generated == 'true' && github.run_id || 'stable' }}
+          MIHOMO_CACHE_BUST: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && matrix.extract_generated == 'true' && github.run_id || 'stable' }}
           SOURCE_DEPS_CACHE_BUST: ${{ github.event_name != 'pull_request' && github.run_id || 'stable' }}
-          REFRESH_GO_DEPS: ${{ (github.event_name == 'push' || github.event_name == 'workflow_run') && github.ref == 'refs/heads/master' && matrix.extract_generated == 'true' }}
-          REFRESH_HEADERS: ${{ (github.event_name == 'push' || github.event_name == 'workflow_run') && github.ref == 'refs/heads/master' && matrix.extract_generated == 'true' }}
+          REFRESH_GO_DEPS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && matrix.extract_generated == 'true' }}
+          REFRESH_HEADERS: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' && matrix.extract_generated == 'true' }}
         run: |
           {
             echo 'args<<EOF'
@@ -225,17 +226,23 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Build to builder stage
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          load: true
-          tags: ${{ matrix.builder_tag }}
-          target: builder
-          platforms: ${{ matrix.builder_platform }}
-          build-args: ${{ steps.docker_args.outputs.args }}
-          cache-from: type=gha,scope=${{ matrix.cache_scope }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+        shell: bash
+        env:
+          BUILD_ARGS: ${{ steps.docker_args.outputs.args }}
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r arg; do
+            [ -n "$arg" ] && args+=(--build-arg "$arg")
+          done <<< "$BUILD_ARGS"
+          docker buildx build \
+            --file "${{ matrix.dockerfile }}" \
+            --load \
+            --tag "${{ matrix.builder_tag }}" \
+            --target builder \
+            --platform "${{ matrix.builder_platform }}" \
+            "${args[@]}" \
+            .
 
       - name: Extract builder output
         shell: bash
@@ -250,9 +257,8 @@ jobs:
 
       - name: Set up QEMU for smoke test
         if: needs.prepare.outputs.is_release == 'true' && matrix.qemu_platforms != ''
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
-        with:
-          platforms: ${{ matrix.qemu_platforms }}
+        shell: bash
+        run: docker run --privileged --rm tonistiigi/binfmt --install "${{ matrix.qemu_platforms }}"
 
       - name: Smoke test artifact (Linux ${{ matrix.arch }})
         if: needs.prepare.outputs.is_release == 'true'
@@ -262,7 +268,7 @@ jobs:
           artifact: SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
 
       - name: Smoke test APKs (OpenWrt ${{ matrix.arch }})
-        if: needs.prepare.outputs.is_release == 'true' && needs.prepare.outputs.apk_built == 'true'
+        if: needs.prepare.outputs.is_release == 'true'
         timeout-minutes: 3
         uses: ./.github/actions/smoke-openwrt-apk
         with:
@@ -276,7 +282,7 @@ jobs:
           path: SubConverter-Extended-*.tar.gz
 
       - name: Upload Artifact (OpenWrt ${{ matrix.arch }})
-        if: needs.prepare.outputs.is_release == 'true' && needs.prepare.outputs.apk_built == 'true'
+        if: needs.prepare.outputs.is_release == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: openwrt-${{ matrix.arch }}
@@ -285,12 +291,7 @@ jobs:
       - name: Clean release packaging files
         if: needs.prepare.outputs.is_release == 'true'
         shell: bash
-        run: |
-          rm -rf SubConverter-Extended SubConverter-Extended-*.tar.gz
-          rm -rf subconverter runtime-libs runtime-root libmihomo.so
-          if [[ "${{ needs.prepare.outputs.apk_built }}" == "true" ]]; then
-            rm -rf SubConverter-Extended-*.apk build/openwrt-apk
-          fi
+        run: rm -rf SubConverter-Extended SubConverter-Extended-*.tar.gz SubConverter-Extended-*.apk subconverter runtime-libs runtime-root libmihomo.so build/openwrt-apk
 
       - name: Check for file changes
         id: check_changes
@@ -302,11 +303,11 @@ jobs:
           fi
 
       - name: Commit and push generated files
-        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
         shell: bash
         run: |
-          BRANCH_NAME="master"
-          echo "Master branch build, pushing generated files to: $BRANCH_NAME"
+          BRANCH_NAME="dev"
+          echo "Dev branch build, pushing generated files to: $BRANCH_NAME"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -317,24 +318,56 @@ jobs:
           git rebase "origin/$BRANCH_NAME"
           git push origin "HEAD:refs/heads/$BRANCH_NAME"
 
-      - name: Report generated file changes outside master
-        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref != 'refs/heads/master'
+      - name: Report generated file changes outside dev
+        if: steps.check_changes.outputs.changed == 'true' && github.event_name != 'pull_request' && github.ref != 'refs/heads/dev'
         shell: bash
         run: |
-          echo "::warning::Generated file changes were detected on ${GITHUB_REF}, but source updates are committed only to master."
+          echo "::warning::Generated file changes were detected on ${GITHUB_REF}, but source updates are committed only to dev."
 
       - name: Build and push final image
         id: build_image
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: ${{ github.event_name != 'pull_request' }}
-          platforms: ${{ matrix.image_platform }}
-          tags: ${{ needs.prepare.outputs.tags }}
-          build-args: ${{ steps.docker_args.outputs.args }}
-          cache-from: type=gha,scope=${{ matrix.cache_scope }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.cache_scope }}
+        shell: bash
+        env:
+          BUILD_ARGS: ${{ steps.docker_args.outputs.args }}
+          IMAGE_TAGS: ${{ needs.prepare.outputs.tags }}
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r arg; do
+            [ -n "$arg" ] && args+=(--build-arg "$arg")
+          done <<< "$BUILD_ARGS"
+          tags=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && tags+=(--tag "$tag")
+          done <<< "$IMAGE_TAGS"
+          if [ "${#tags[@]}" -eq 0 ]; then
+            tags+=(--tag "subconverter-extended:${{ matrix.arch }}-ci")
+          fi
+          output=(--load)
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            output=(--push)
+          fi
+          metadata_file="build-metadata-${{ matrix.arch }}.json"
+          docker buildx build \
+            --file "${{ matrix.dockerfile }}" \
+            --platform "${{ matrix.image_platform }}" \
+            "${output[@]}" \
+            "${tags[@]}" \
+            "${args[@]}" \
+            --metadata-file "$metadata_file" \
+            .
+          digest="$(python3 - "$metadata_file" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], "r", encoding="utf-8") as handle:
+              data = json.load(handle)
+          print(data.get("containerimage.digest", ""))
+          PY
+          )"
+          if [ -n "$digest" ]; then
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Save image digest
         if: needs.prepare.outputs.is_release == 'true' && github.event_name != 'pull_request'
@@ -355,24 +388,20 @@ jobs:
         timeout-minutes: 3
         uses: ./.github/actions/smoke-docker-image
         with:
-          image: jshir700/subconverter-extended@${{ steps.build_image.outputs.digest }}
+          image: ghcr.io/aethersailor/subconverter-extended@${{ steps.build_image.outputs.digest }}
           platform: ${{ matrix.image_platform }}
 
   build-windows-amd64:
     name: "🪟 Windows Build (amd64)"
     runs-on: windows-latest
     needs: prepare
-    if: needs.prepare.outputs.is_release == 'true' && needs.prepare.outputs.docker_changed != 'false'
+    if: needs.prepare.outputs.is_release == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.event_name == 'pull_request' && github.token || secrets.PAT_TOKEN }}
           fetch-depth: 0
-
-      - name: Checkout exact commit for workflow_run
-        if: github.event_name == 'workflow_run'
-        run: git checkout ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -428,13 +457,20 @@ jobs:
     if: needs.prepare.outputs.is_release == 'true' && github.event_name != 'pull_request'
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download image digests
         uses: actions/download-artifact@v8
@@ -442,7 +478,6 @@ jobs:
           path: digests
           pattern: docker-digest-*
           merge-multiple: true
-
 
       - name: Create and push manifest list
         shell: bash
@@ -458,7 +493,8 @@ jobs:
           ARMV7_DIGEST="$(cat digests/armv7.txt)"
           TAGS="${{ needs.prepare.outputs.tags }}"
           IMAGE_NAMES=(
-            "jshir700/subconverter-extended"
+            "aethersailor/subconverter-extended"
+            "ghcr.io/aethersailor/subconverter-extended"
           )
 
           for IMAGE_NAME in "${IMAGE_NAMES[@]}"; do
@@ -507,28 +543,11 @@ jobs:
             done
           done
 
-  update-dockerhub-description:
-    name: "📝 Update Docker Hub Description"
-    runs-on: ubuntu-latest
-    needs: [merge-manifest]
-    if: needs.prepare.outputs.is_release == 'true' && github.event_name != 'pull_request'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: jshir700/subconverter-extended
-          readme-filepath: ./README.md
-
   create-release:
     name: "🚀 Release Artifacts"
     runs-on: ubuntu-latest
     needs: [prepare, build-linux, build-windows-amd64, merge-manifest]
-    if: needs.prepare.outputs.is_tag == 'true'
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.overwrite_existing_release == true)
     permissions:
       contents: write
     steps:
@@ -538,32 +557,42 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare Release Notes Context
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          OVERWRITE_EXISTING_RELEASE: ${{ inputs.overwrite_existing_release }}
         run: |
           set -euo pipefail
 
           git fetch --tags --force origin
 
-          CURRENT_TAG="${{ needs.prepare.outputs.version }}"
-          CURRENT_COMMIT="$(git rev-list -n 1 "$CURRENT_TAG")"
-          PREVIOUS_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "${CURRENT_COMMIT}^" 2>/dev/null || true)"
+          CURRENT_TAG="$RELEASE_VERSION"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ "${OVERWRITE_EXISTING_RELEASE}" = "true" ]; then
+            CURRENT_COMMIT="$(git rev-parse HEAD)"
+            TAG_COMMIT="$(git rev-list -n 1 "$CURRENT_TAG")"
+            PREVIOUS_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "${TAG_COMMIT}^" 2>/dev/null || true)"
+          else
+            CURRENT_COMMIT="$(git rev-list -n 1 "$CURRENT_TAG")"
+            PREVIOUS_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "${CURRENT_COMMIT}^" 2>/dev/null || true)"
+          fi
           EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
           if [ -n "$PREVIOUS_TAG" ]; then
-            RANGE_LABEL="$PREVIOUS_TAG..$CURRENT_TAG"
-            git log --pretty=format:'- %h %s' "$PREVIOUS_TAG..$CURRENT_TAG" > commits.md
-            git diff --name-only "$PREVIOUS_TAG" "$CURRENT_TAG" > changed-files.md
-            git diff --stat "$PREVIOUS_TAG" "$CURRENT_TAG" > diffstat.md
+            RANGE_LABEL="$PREVIOUS_TAG..$CURRENT_COMMIT"
+            git log --pretty=format:'- %h %s' "$PREVIOUS_TAG..$CURRENT_COMMIT" > commits.md
+            git diff --name-only "$PREVIOUS_TAG" "$CURRENT_COMMIT" > changed-files.md
+            git diff --stat "$PREVIOUS_TAG" "$CURRENT_COMMIT" > diffstat.md
           else
-            RANGE_LABEL="$CURRENT_TAG"
-            git log --pretty=format:'- %h %s' "$CURRENT_TAG" > commits.md
-            git diff --name-only "$EMPTY_TREE" "$CURRENT_TAG^{tree}" > changed-files.md
-            git diff --stat "$EMPTY_TREE" "$CURRENT_TAG^{tree}" > diffstat.md
+            RANGE_LABEL="$CURRENT_COMMIT"
+            git log --pretty=format:'- %h %s' "$CURRENT_COMMIT" > commits.md
+            git diff --name-only "$EMPTY_TREE" "$CURRENT_COMMIT^{tree}" > changed-files.md
+            git diff --stat "$EMPTY_TREE" "$CURRENT_COMMIT^{tree}" > diffstat.md
           fi
 
           {
             echo "# Release Context"
             echo
             echo "Current tag: $CURRENT_TAG"
+            echo "Current commit: $CURRENT_COMMIT"
             echo "Previous tag: ${PREVIOUS_TAG:-none}"
             echo "Range: $RANGE_LABEL"
             echo
@@ -580,12 +609,23 @@ jobs:
           } > release-context.md
 
           {
-            echo "## Changes / 变更"
+            echo "## English"
             echo
+            echo "### Changes"
             if [ -s commits.md ]; then
               cat commits.md
             else
-              echo "- No commit summary was available. / 未获取到提交摘要。"
+              echo "- No commit summary was available."
+            fi
+            echo
+            echo "## 中文"
+            echo
+            echo "### 变更"
+            echo "本次发布包含以下提交："
+            if [ -s commits.md ]; then
+              cat commits.md
+            else
+              echo "- 未获取到提交摘要。"
             fi
           } > release-notes.fallback.md
 
@@ -621,17 +661,25 @@ jobs:
           Summarize user-visible changes first. Mention maintenance or dependency changes only when relevant.
           Ignore auto-generated files unless the context shows they affect users.
 
-          Commit messages are bilingual (Chinese + English), so use them as-is when referencing specific changes.
-
           Return only Markdown. Do not wrap the answer in a code fence.
           Do not include a downloads section; it will be appended by the workflow.
 
           Required format:
 
-          ## Highlights / 亮点
+          ## English
+
+          ### Highlights
           - ...
 
-          ## Changes / 变更
+          ### Changes
+          - ...
+
+          ## 中文
+
+          ### 亮点
+          - ...
+
+          ### 变更
           - ...
 
           Omit empty sections. Keep each language concise and accurate.
@@ -659,63 +707,45 @@ jobs:
 
           cat >> release-notes.md <<'EOF'
 
-          ---
+          ## Docker Images
 
-          <div align="center">
+          Docker images are published to:
+          - `aethersailor/subconverter-extended`
+          - `ghcr.io/aethersailor/subconverter-extended`
 
-          <img alt="Version" src="https://img.shields.io/badge/version-${{ needs.prepare.outputs.version }}-blue?style=for-the-badge&logo=github">&nbsp;<img alt="Docker" src="https://img.shields.io/badge/docker-jshir700%2Fsubconverter--extended-2496ED?style=for-the-badge&logo=docker">&nbsp;<img alt="License" src="https://img.shields.io/badge/license-GPL--3.0-orange?style=for-the-badge">&nbsp;<img alt="Platform" src="https://img.shields.io/badge/platform-amd64%20|%20arm64%20|%20armv7-lightgrey?style=for-the-badge">
+          Supported Docker platforms:
+          - `linux/amd64`
+          - `linux/arm64`
+          - `linux/arm/v7`
 
-          </div>
+          ## Downloads
 
-          ---
+          ### Linux (portable, glibc runtime bundled)
+          - **amd64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz`
+          - **arm64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-arm64.tar.gz`
+          - **armv7**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-armv7.tar.gz`
 
-          ## 🐳 Docker Images / Docker 镜像
+          ### Windows (portable)
+          - **amd64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-windows-amd64.zip`
 
-          | Platform / 平台 | Arch | Image / 镜像 |
-          |:---|:---|:---|
-          | `linux/amd64` | x86_64 | `jshir700/subconverter-extended:${{ needs.prepare.outputs.version }}` |
-          | `linux/arm64` | aarch64 | `jshir700/subconverter-extended:${{ needs.prepare.outputs.version }}` |
-          | `linux/arm/v7` | armv7 | `jshir700/subconverter-extended:${{ needs.prepare.outputs.version }}` |
+          ### OpenWrt 25.12+ APK (unsigned)
+          Install with `apk add --allow-untrusted ./<package>.apk`. Choose the APK whose OpenWrt architecture suffix matches `apk print-arch`.
+          User configuration is created at `/etc/subconverter/pref.toml` on first start and is not overwritten by upgrades.
+          - **x86_64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-x86_64.apk`
+          - **aarch64**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-aarch64_generic.apk`, `...-aarch64_cortex-a53.apk`, `...-aarch64_cortex-a72.apk`
+          - **armv7**: `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-arm_cortex-*.apk`
 
-          > 🏷️ `latest` tag is also updated to this release / `latest` 标签同步更新至本版本
-
-          ## 📥 Downloads / 下载
-
-          ### 🐧 Linux (portable, glibc runtime bundled) / Linux 便携版
-
-          | Arch | File / 文件 |
-          |:---|:---|
-          | **amd64** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-amd64.tar.gz` |
-          | **arm64** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-arm64.tar.gz` |
-          | **armv7** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-linux-armv7.tar.gz` |
-
-          ### 🪟 Windows (portable) / Windows 便携版
-
-          | Arch | File / 文件 |
-          |:---|:---|
-          | **amd64** | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-windows-amd64.zip` |
-
-          ### 🌐 OpenWrt 25.12+ APK (unsigned) / OpenWrt 25.12+ APK（未签名）
-
-          > 📦 Install / 安装: `apk add --allow-untrusted ./<package>.apk`
-          > ⚙️ Config / 配置: `/etc/subconverter/pref.toml` (created on first start, preserved across upgrades / 首次启动创建，升级保留)
-
-          | Arch / 架构 | OpenWrt Target | File / 文件 |
-          |:---|:---|:---|
-          | **x86_64** | `x86_64` | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-x86_64.apk` |
-          | **aarch64** | `aarch64_generic` | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-aarch64_generic.apk` |
-          | **aarch64** | `aarch64_cortex-a53` | `...-aarch64_cortex-a53.apk` |
-          | **aarch64** | `aarch64_cortex-a72` | `...-aarch64_cortex-a72.apk` |
-          | **armv7** | `arm_cortex-a5_vfpv4` | `SubConverter-Extended-${{ needs.prepare.outputs.version }}-openwrt-arm_cortex-a5_vfpv4.apk` |
-          | **armv7** | `arm_cortex-a7 / a8 / a9 / a15` | `...-arm_cortex-a*.apk` |
-
-          ### 🔐 Checksums / 校验和
-
-          | File / 文件 | SHA256 |
-          |:---|:---|
-          | `SHA256SUMS` | See attached / 见附件 |
-
+          ### Checksums
+          - `SHA256SUMS`
           EOF
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.overwrite_existing_release }}" = "true" ]; then
+            {
+              echo
+              echo "<!-- rebuilt-from: $(git rev-parse HEAD) -->"
+              echo "<!-- rebuilt-at: $(date -u +%Y-%m-%dT%H:%M:%SZ) -->"
+            } >> release-notes.md
+          fi
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -744,3 +774,4 @@ jobs:
             artifacts/windows-*/*.zip
             SHA256SUMS
           body_path: release-notes.md
+          overwrite_files: true

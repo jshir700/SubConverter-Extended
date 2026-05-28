@@ -60,6 +60,7 @@ struct extra_settings {
   std::vector<ProxyProvider> providers; // provider 列表
   bool authorized = false;
   bool dedup = true;                    // 是否按规则类型去重
+  RuleConversionStats *rule_stats = nullptr;
 
   extra_settings() = default;
   extra_settings(const extra_settings &) = delete;

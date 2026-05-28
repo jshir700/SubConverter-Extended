@@ -426,7 +426,7 @@ std::string findFileName(const std::string &path)
     return path.substr(pos + 1, pos2 - pos - 1);
 }
 
-int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules, bool dedup)
+int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules, bool dedup, RuleConversionStats *stats)
 {
     nlohmann::json data;
     std::string match_group, geoips, retrieved_rules;
@@ -475,6 +475,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
             }
             strLine = appendClashRuleTarget(strLine, rule_group);
             rules.emplace_back(std::move(strLine));
+            if(stats)
+                stats->add();
             continue;
         }
         else
@@ -504,7 +506,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     break;
                 }
                 if(!script)
+                {
                     rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                    if(stats)
+                        stats->add();
+                }
                 groups.emplace_back(rule_name);
                 groupsSet.emplace(rule_name);
                 continue;
@@ -544,8 +550,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     {
                         if(x.provider)
                         {
-                            if(!script)
+                            if(!script) {
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                                if(stats)
+                                    stats->add();
+                            }
                             groups.emplace_back(rule_name);
                             groupsSet.emplace(rule_name);
                             continue;
@@ -562,8 +571,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     {
                         if(x.provider)
                         {
-                            if(!script)
+                            if(!script) {
                                 rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                                if(stats)
+                                    stats->add();
+                            }
                             groups.emplace_back(rule_name);
                             groupsSet.emplace(rule_name);
                             continue;
@@ -579,7 +591,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     else if(x.provider)
                     {
                         if(!script)
+                        {
                             rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                            if(stats)
+                                stats->add();
+                        }
                         groups.emplace_back(rule_name);
                         groupsSet.emplace(rule_name);
                         continue;
@@ -646,6 +662,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                     if(count_least(strLine, ',', 3))
                         strLine = regReplace(strLine, "^(.*?,.*?)(,.*)(,.*)$", "$1$3$2");
                     rules.emplace_back(std::move(strLine));
+                    if(stats)
+                        stats->add();
                 }
                 else if(startsWith(strLine, "DOMAIN-KEYWORD,"))
                 {
@@ -680,6 +698,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
                                 continue;
                         }
                         rules.emplace_back(strLine);
+                        if(stats)
+                            stats->add();
                     }
                 }
                 else if(!has_domain[rule_name] && (startsWith(strLine, "DOMAIN,") || startsWith(strLine, "DOMAIN-SUFFIX,")))
@@ -694,16 +714,26 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
             if(!ruleset_inline_expand)
             {
                 if(has_domain[rule_name] && !script)
+                {
                     rules.emplace_back("RULE-SET," + rule_name + " (Domain)," + rule_group);
+                    if(stats)
+                        stats->add();
+                }
                 if(has_ipcidr[rule_name] && !script)
                 {
                     if(has_no_resolve)
                         rules.emplace_back("RULE-SET," + rule_name + " (IP-CIDR)," + rule_group + ",no-resolve");
                     else
                         rules.emplace_back("RULE-SET," + rule_name + " (IP-CIDR)," + rule_group);
+                    if(stats)
+                        stats->add();
                 }
                 if(!has_domain[rule_name] && !has_ipcidr[rule_name] && !script)
+                {
                     rules.emplace_back("RULE-SET," + rule_name + "," + rule_group);
+                    if(stats)
+                        stats->add();
+                }
                 if(groupsSet.emplace(rule_name).second)
                     groups.emplace_back(rule_name);
             }
@@ -774,6 +804,8 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
         }
         if(script)
         {
+            if(stats)
+                stats->add();
             std::string json_path = "rules." + std::to_string(index) + ".";
             parse_json_pointer(data, json_path + "has_domain", group_has_domain ? "true" : "false");
             parse_json_pointer(data, json_path + "has_ipcidr", group_has_ipcidr ? "true" : "false");

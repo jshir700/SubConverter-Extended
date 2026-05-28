@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <ctime>
 #include <exception>
 #include <iostream>
@@ -12,6 +13,8 @@
 #include <unordered_set>
 
 #include <inja.hpp>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 #include <yaml-cpp/yaml.h>
 
 #include "config/binding.h"
@@ -21,10 +24,12 @@
 #include "generator/template/templates.h"
 #include "interfaces.h"
 #include "multithread.h"
+#include "parser/mihomo_scheme_utils.h"
 #include "script/cron.h"
 #include "script/script_quickjs.h"
 #include "server/webserver.h"
 #include "settings.h"
+#include "statistics.h"
 #include "upload.h"
 #include "utils/time_compat.h"
 
@@ -759,7 +764,8 @@ static std::string sanitizeProviderName(const std::string &input) {
   return cleaned;
 }
 
-static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS);
+static std::string subconverter_impl(Request &request, Response &response,
+                                     RuleConversionStats *rule_stats = nullptr);
 
 namespace {
 
@@ -768,6 +774,7 @@ struct CoalescedResponse {
   std::string content_type;
   string_icase_map headers;
   std::string body;
+  uint64_t rule_conversions = 0;
 };
 
 struct InflightSubRequest {
@@ -788,6 +795,278 @@ static std::map<std::string, std::shared_ptr<InflightSubRequest>>
     g_sub_inflight;
 static std::mutex g_sub_response_cache_mutex;
 static std::map<std::string, CachedSubResponse> g_sub_response_cache;
+
+struct SubExplainProvider {
+  std::string name;
+  std::string tag;
+  std::string source_hash;
+  std::string path;
+  std::string filter;
+  std::string exclude_filter;
+  int group_id = 0;
+  uint32_t interval = 0;
+};
+
+struct SubExplainParameter {
+  std::string name;
+  std::string source;
+  std::string status;
+  std::string value_preview;
+  std::string value_hash;
+  std::string effective_value;
+  std::string note;
+  size_t raw_length = 0;
+  size_t value_length = 0;
+  bool present = false;
+  bool sensitive = false;
+};
+
+struct SubExplainConfigSection {
+  std::string name;
+  std::string source;
+  std::string status;
+  std::string detail;
+};
+
+struct SubExplainReport {
+  bool enabled = false;
+  std::string requested_target;
+  std::string target;
+  bool simple_subscription = false;
+  bool upload_requested = false;
+  bool upload_suppressed = false;
+  bool external_config_provided = false;
+  bool external_config_loaded = false;
+  bool fallback_config_used = false;
+  bool rule_generator_enabled = false;
+  bool expand_rulesets = false;
+  bool proxy_provider_mode = false;
+  bool nodelist = false;
+  bool managed_config = false;
+  std::string base_fetch_context = "trusted_config";
+  std::string ruleset_fetch_context = "trusted_config";
+  size_t raw_url_count = 0;
+  size_t insert_url_count = 0;
+  size_t subscription_url_count = 0;
+  size_t node_link_count = 0;
+  size_t unknown_node_link_count = 0;
+  size_t provider_count = 0;
+  size_t insert_node_count = 0;
+  size_t direct_node_count = 0;
+  size_t total_node_count = 0;
+  size_t ruleset_count = 0;
+  size_t custom_group_count = 0;
+  size_t output_bytes = 0;
+  std::vector<SubExplainProvider> providers;
+  std::vector<SubExplainParameter> recognized_parameters;
+  std::vector<SubExplainParameter> unrecognized_parameters;
+  std::string effective_config_source = "none";
+  std::vector<SubExplainConfigSection> effective_config_sections;
+};
+
+static std::string fetchContextName(FetchContext context) {
+  switch (context) {
+  case FetchContext::PublicRequest:
+    return "public_request";
+  case FetchContext::TrustedConfig:
+  default:
+    return "trusted_config";
+  }
+}
+
+static std::string shortHash(const std::string &value) {
+  if (value.empty())
+    return "";
+  return getMD5(value).substr(0, 10);
+}
+
+static std::string boolString(bool value) { return value ? "true" : "false"; }
+
+static std::string previewExplainValue(const std::string &raw_value,
+                                       bool sensitive) {
+  std::string decoded = urlDecode(raw_value);
+  if (decoded.empty())
+    return "";
+  if (sensitive)
+    return "[redacted]";
+
+  static constexpr size_t kMaxPreview = 180;
+  if (decoded.size() <= kMaxPreview)
+    return decoded;
+  return decoded.substr(0, kMaxPreview) + "...";
+}
+
+static void writeJsonString(
+    rapidjson::Writer<rapidjson::StringBuffer> &writer, const char *key,
+    const std::string &value) {
+  writer.Key(key);
+  writer.String(value.c_str());
+}
+
+static void writeExplainParameter(
+    rapidjson::Writer<rapidjson::StringBuffer> &writer,
+    const SubExplainParameter &parameter) {
+  writer.StartObject();
+  writeJsonString(writer, "name", parameter.name);
+  writer.Key("present");
+  writer.Bool(parameter.present);
+  writeJsonString(writer, "source", parameter.source);
+  writeJsonString(writer, "status", parameter.status);
+  writeJsonString(writer, "value_preview", parameter.value_preview);
+  writeJsonString(writer, "value_hash", parameter.value_hash);
+  writer.Key("raw_length");
+  writer.Uint64(parameter.raw_length);
+  writer.Key("value_length");
+  writer.Uint64(parameter.value_length);
+  writeJsonString(writer, "effective_value", parameter.effective_value);
+  writeJsonString(writer, "note", parameter.note);
+  writer.Key("sensitive");
+  writer.Bool(parameter.sensitive);
+  writer.EndObject();
+}
+
+static void writeExplainConfigSection(
+    rapidjson::Writer<rapidjson::StringBuffer> &writer,
+    const SubExplainConfigSection &section) {
+  writer.StartObject();
+  writeJsonString(writer, "name", section.name);
+  writeJsonString(writer, "source", section.source);
+  writeJsonString(writer, "status", section.status);
+  writeJsonString(writer, "detail", section.detail);
+  writer.EndObject();
+}
+
+static std::string serializeSubExplainReport(const SubExplainReport &report,
+                                             const Response &response) {
+  rapidjson::StringBuffer buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+
+  writer.StartObject();
+  writer.Key("ok");
+  writer.Bool(response.status_code >= 200 && response.status_code < 300);
+  writer.Key("status_code");
+  writer.Int(response.status_code);
+  writeJsonString(writer, "requested_target", report.requested_target);
+  writeJsonString(writer, "target", report.target);
+
+  writer.Key("mode");
+  writer.StartObject();
+  writer.Key("simple_subscription");
+  writer.Bool(report.simple_subscription);
+  writer.Key("proxy_provider");
+  writer.Bool(report.proxy_provider_mode);
+  writer.Key("nodelist");
+  writer.Bool(report.nodelist);
+  writer.Key("expand_rulesets");
+  writer.Bool(report.expand_rulesets);
+  writer.Key("rule_generator");
+  writer.Bool(report.rule_generator_enabled);
+  writer.Key("managed_config");
+  writer.Bool(report.managed_config);
+  writer.Key("upload_requested");
+  writer.Bool(report.upload_requested);
+  writer.Key("upload_suppressed");
+  writer.Bool(report.upload_suppressed);
+  writer.EndObject();
+
+  writer.Key("inputs");
+  writer.StartObject();
+  writer.Key("raw_url_count");
+  writer.Uint64(report.raw_url_count);
+  writer.Key("insert_url_count");
+  writer.Uint64(report.insert_url_count);
+  writer.Key("subscription_url_count");
+  writer.Uint64(report.subscription_url_count);
+  writer.Key("node_link_count");
+  writer.Uint64(report.node_link_count);
+  writer.Key("unknown_node_link_count");
+  writer.Uint64(report.unknown_node_link_count);
+  writer.EndObject();
+
+  writer.Key("external_config");
+  writer.StartObject();
+  writer.Key("provided");
+  writer.Bool(report.external_config_provided);
+  writer.Key("loaded");
+  writer.Bool(report.external_config_loaded);
+  writer.Key("fallback_used");
+  writer.Bool(report.fallback_config_used);
+  writer.EndObject();
+
+  writer.Key("parameters");
+  writer.StartObject();
+  writer.Key("recognized");
+  writer.StartArray();
+  for (const SubExplainParameter &parameter : report.recognized_parameters)
+    writeExplainParameter(writer, parameter);
+  writer.EndArray();
+  writer.Key("unrecognized");
+  writer.StartArray();
+  for (const SubExplainParameter &parameter : report.unrecognized_parameters)
+    writeExplainParameter(writer, parameter);
+  writer.EndArray();
+  writer.EndObject();
+
+  writer.Key("effective_config");
+  writer.StartObject();
+  writeJsonString(writer, "source", report.effective_config_source);
+  writer.Key("sections");
+  writer.StartArray();
+  for (const SubExplainConfigSection &section :
+       report.effective_config_sections)
+    writeExplainConfigSection(writer, section);
+  writer.EndArray();
+  writer.EndObject();
+
+  writer.Key("resources");
+  writer.StartObject();
+  writeJsonString(writer, "base_fetch_context", report.base_fetch_context);
+  writeJsonString(writer, "ruleset_fetch_context", report.ruleset_fetch_context);
+  writer.Key("ruleset_count");
+  writer.Uint64(report.ruleset_count);
+  writer.Key("custom_group_count");
+  writer.Uint64(report.custom_group_count);
+  writer.EndObject();
+
+  writer.Key("nodes");
+  writer.StartObject();
+  writer.Key("insert");
+  writer.Uint64(report.insert_node_count);
+  writer.Key("direct");
+  writer.Uint64(report.direct_node_count);
+  writer.Key("total");
+  writer.Uint64(report.total_node_count);
+  writer.EndObject();
+
+  writer.Key("providers");
+  writer.StartArray();
+  for (const SubExplainProvider &provider : report.providers) {
+    writer.StartObject();
+    writeJsonString(writer, "name", provider.name);
+    writeJsonString(writer, "tag", provider.tag);
+    writeJsonString(writer, "source_hash", provider.source_hash);
+    writeJsonString(writer, "path", provider.path);
+    writeJsonString(writer, "filter", provider.filter);
+    writeJsonString(writer, "exclude_filter", provider.exclude_filter);
+    writer.Key("group_id");
+    writer.Int(provider.group_id);
+    writer.Key("interval");
+    writer.Uint(provider.interval);
+    writer.EndObject();
+  }
+  writer.EndArray();
+
+  writer.Key("output");
+  writer.StartObject();
+  writer.Key("bytes");
+  writer.Uint64(report.output_bytes);
+  writer.Key("provider_count");
+  writer.Uint64(report.provider_count);
+  writer.EndObject();
+
+  writer.EndObject();
+  return buffer.GetString();
+}
 
 static bool isTruthyRequestValue(const std::string &value) {
   std::string normalized = toLower(trimWhitespace(value, true, true));
@@ -854,12 +1133,14 @@ static void copyCoalescedToResponse(const CoalescedResponse &result,
 }
 
 static CoalescedResponse makeCoalescedResult(const std::string &body,
-                                             const Response &response) {
+                                             const Response &response,
+                                             uint64_t rule_conversions) {
   CoalescedResponse result;
   result.status_code = response.status_code;
   result.content_type = response.content_type;
   result.headers = response.headers;
   result.body = body;
+  result.rule_conversions = rule_conversions;
   return result;
 }
 
@@ -915,11 +1196,16 @@ static void storeCachedSubResponse(const std::string &key,
 }
 
 static std::string runSubconverterImplWithRetry(const Request &original,
-                                                Response &response) {
+                                                Response &response,
+                                                RuleConversionStats *stats) {
   Request first_request = original;
   Response first_response;
-  std::string body = subconverter_impl(first_request, first_response);
+  RuleConversionStats first_stats;
+  std::string body = subconverter_impl(first_request, first_response,
+                                       stats ? &first_stats : nullptr);
   if (first_response.status_code < 500 || !global.coalesceRetryOn5xx) {
+    if (stats)
+      *stats = first_stats;
     response = first_response;
     return body;
   }
@@ -929,30 +1215,57 @@ static std::string runSubconverterImplWithRetry(const Request &original,
            LOG_LEVEL_WARNING);
   Request retry_request = original;
   Response retry_response;
-  std::string retry_body = subconverter_impl(retry_request, retry_response);
+  RuleConversionStats retry_stats;
+  std::string retry_body = subconverter_impl(retry_request, retry_response,
+                                             stats ? &retry_stats : nullptr);
   if (retry_response.status_code < 500) {
+    if (stats)
+      *stats = retry_stats;
     response = retry_response;
     return retry_body;
   }
 
+  if (stats)
+    *stats = first_stats;
   response = first_response;
   return body;
 }
 
-} // namespace
+static void recordTrackedSubRequest(bool track, const Request &request,
+                                    const Response &response,
+                                    uint64_t rule_conversions) {
+  if (!track)
+    return;
+  if (response.status_code < 200 || response.status_code >= 300)
+    return;
+  statistics::recordSubscriptionConversion(request, rule_conversions);
+}
 
-std::string subconverter(RESPONSE_CALLBACK_ARGS) {
-  if (!shouldCoalesceSubRequest(request))
-    return subconverter_impl(request, response);
+static std::string subconverterEntry(Request &request, Response &response,
+                                     bool track) {
+  if (!shouldCoalesceSubRequest(request)) {
+    RuleConversionStats stats;
+    std::string body =
+        subconverter_impl(request, response, track ? &stats : nullptr);
+    recordTrackedSubRequest(track, request, response, stats.rules);
+    return body;
+  }
 
   std::string key = buildSubRequestKey(request);
-  if (key.empty())
-    return subconverter_impl(request, response);
+  if (key.empty()) {
+    RuleConversionStats stats;
+    std::string body =
+        subconverter_impl(request, response, track ? &stats : nullptr);
+    recordTrackedSubRequest(track, request, response, stats.rules);
+    return body;
+  }
 
   CoalescedResponse cached_result;
   if (getCachedSubResponse(key, cached_result)) {
     writeLog(0, "/sub 响应微缓存命中。", LOG_LEVEL_DEBUG);
     copyCoalescedToResponse(cached_result, response);
+    recordTrackedSubRequest(track, request, response,
+                            cached_result.rule_conversions);
     return cached_result.body;
   }
 
@@ -978,6 +1291,8 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     if (call->exception)
       std::rethrow_exception(call->exception);
     copyCoalescedToResponse(call->result, response);
+    recordTrackedSubRequest(track, request, response,
+                            call->result.rule_conversions);
     return call->result.body;
   }
 
@@ -985,9 +1300,11 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     writeLog(0, "/sub 请求成为同 key 转换 owner。", LOG_LEVEL_DEBUG);
     Request original_request = request;
     Response owner_response;
-    std::string body =
-        runSubconverterImplWithRetry(original_request, owner_response);
-    CoalescedResponse result = makeCoalescedResult(body, owner_response);
+    RuleConversionStats stats;
+    std::string body = runSubconverterImplWithRetry(
+        original_request, owner_response, track ? &stats : nullptr);
+    CoalescedResponse result =
+        makeCoalescedResult(body, owner_response, stats.rules);
     response = owner_response;
     {
       std::lock_guard<std::mutex> lock(call->mutex);
@@ -1000,6 +1317,7 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
     }
     storeCachedSubResponse(key, result);
     call->cv.notify_all();
+    recordTrackedSubRequest(track, request, response, result.rule_conversions);
     return body;
   } catch (const std::exception &e) {
     writeLog(LOG_TYPE_ERROR, std::string(e.what()),
@@ -1035,17 +1353,45 @@ std::string subconverter(RESPONSE_CALLBACK_ARGS) {
   }
 }
 
-static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
+} // namespace
+
+std::string subconverter(RESPONSE_CALLBACK_ARGS) {
+  return subconverterEntry(request, response, false);
+}
+
+std::string subconverterTracked(RESPONSE_CALLBACK_ARGS) {
+  return subconverterEntry(request, response, true);
+}
+
+static std::string subconverter_impl(Request &request, Response &response,
+                                     RuleConversionStats *rule_stats) {
   auto &argument = request.argument;
   int *status_code = &response.status_code;
 
   std::string argTarget = getUrlArg(argument, "target"),
               argSurgeVer = getUrlArg(argument, "ver");
+  bool explainMode = isTruthyRequestValue(getUrlArg(argument, "explain"));
+  SubExplainReport explain;
+  explain.enabled = explainMode;
+  explain.requested_target = argTarget;
+  if (explainMode) {
+    std::string rawUrlForLog = getUrlArg(argument, "url");
+    writeLog(0,
+             "收到 /sub explain JSON 诊断请求：target=" +
+                 (argTarget.empty() ? std::string("<empty>") : argTarget) +
+                 ", 参数数量=" + std::to_string(argument.size()) +
+                 ", url_hash=" +
+                 (rawUrlForLog.empty() ? std::string("-")
+                                       : shortHash(urlDecode(rawUrlForLog))) +
+                 "。",
+             LOG_LEVEL_INFO);
+  }
   tribool argClashNewField = getUrlArg(argument, "new_name");
   int intSurgeVer = !argSurgeVer.empty() ? to_int(argSurgeVer, 3) : 3;
   if (argTarget == "auto")
     matchUserAgent(request.headers["User-Agent"], argTarget, argClashNewField,
                    intSurgeVer);
+  explain.target = argTarget;
 
   /// don't try to load groups or rulesets when generating simple subscriptions
   bool lSimpleSubscription = false;
@@ -1166,6 +1512,11 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
           argTLS13 = getUrlArg(argument, "tls13"),
           argProviderProxyDirect = getUrlArg(argument, "provider_proxy_direct");
   tribool argDedup = getUrlArg(argument, "dedup");
+  explain.upload_requested = argUpload.get(false);
+  if (explainMode && argUpload) {
+    argUpload = false;
+    explain.upload_suppressed = true;
+  }
 
   std::string base_content, output_content;
   ProxyGroupConfigs lCustomProxyGroups = global.customProxyGroups;
@@ -1174,6 +1525,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
                lExcludeRemarks = global.excludeRemarks;
   std::vector<RulesetContent> lRulesetContent;
   extra_settings ext;
+  ext.rule_stats = rule_stats;
   std::string subInfo, dummy;
   int interval = !argUpdateInterval.empty()
                      ? to_int(argUpdateInterval, global.updateInterval)
@@ -1186,6 +1538,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   bool strict = !argUpdateStrict.empty()
                                         ? argUpdateStrict == "true"
                                         : global.updateStrict;
+  explain.simple_subscription = lSimpleSubscription;
 
   if (std::find(gRegexBlacklist.cbegin(), gRegexBlacklist.cend(),
                 argIncludeRemark) != gRegexBlacklist.cend() ||
@@ -1284,16 +1637,20 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   ext.clash_new_field_name = true;
   if (argExpandRulesets)
     ext.clash_script = false;
+  explain.expand_rulesets = argExpandRulesets.get(false);
 
   ext.nodelist = argGenNodeList;
   // 强制 list=false，直接覆盖用户提供的任何值
   // 确保始终使用 proxy-provider 模式，而不是读取订阅并形成节点列表
   ext.nodelist = false;
+  explain.nodelist = ext.nodelist;
   ext.surge_ssr_path = global.surgeSSRPath;
   ext.quanx_dev_id = !argDeviceID.empty() ? argDeviceID : global.quanXDevID;
   ext.enable_rule_generator = global.enableRuleGen;
   ext.overwrite_original_rules = global.overwriteOriginalRules;
   ext.managed_config_prefix = global.managedConfigPrefix;
+  explain.rule_generator_enabled = ext.enable_rule_generator;
+  explain.managed_config = !ext.managed_config_prefix.empty();
 
   /// load external configuration
   std::string userProvidedConfig = getUrlArg(argument, "config");
@@ -1305,6 +1662,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   FetchContext baseFetchContext = FetchContext::TrustedConfig;
   bool configLoadSuccess = false;
   string_map tpl_args_base = tpl_args.local_vars;
+  explain.external_config_provided = userProvidedExternalConfig;
 
   if (argExternalConfig.empty())
     argExternalConfig = global.defaultExtConfig;
@@ -1320,6 +1678,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
     if (load_result == 0 &&
         hasEffectiveExternalConfig(extconf, tpl_args, tpl_args_base)) {
       configLoadSuccess = true;
+      explain.external_config_loaded = true;
       if (!ext.nodelist) {
         if (checkExternalBase(extconf.sssub_rule_base, lSSSubBase,
                               externalConfigContext))
@@ -1404,6 +1763,8 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
           writeLog(0, "已成功加载配置：" + fallbackUrl,
                    LOG_LEVEL_INFO);
           configLoadSuccess = true;
+          explain.external_config_loaded = true;
+          explain.fallback_config_used = true;
           if (!ext.nodelist) {
             checkExternalBase(extconf.sssub_rule_base, lSSSubBase,
                               FetchContext::TrustedConfig);
@@ -1494,6 +1855,11 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
       lRulesetContent = global.rulesetsContent;
     }
   }
+  explain.rule_generator_enabled = ext.enable_rule_generator;
+  explain.base_fetch_context = fetchContextName(baseFetchContext);
+  explain.ruleset_fetch_context = fetchContextName(rulesetFetchContext);
+  explain.ruleset_count = lRulesetContent.size();
+  explain.custom_group_count = lCustomProxyGroups.size();
 
   if (!argEmoji.is_undef()) {
     argAddEmoji.set(argEmoji);
@@ -1553,6 +1919,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
     if (urls.size() <= 1 && !global.insertUrls.empty()) {
       urls = split(global.insertUrls, "|");
     }
+    explain.insert_url_count = urls.size();
     importItems(urls, true);
     for (std::string &x : urls) {
       x = regTrim(x);
@@ -1604,6 +1971,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
       ++it;
     }
   }
+  explain.raw_url_count = urls.size();
   parse_set.fetch_context = FetchContext::PublicRequest;
   groupID = 0;
 
@@ -1668,14 +2036,9 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
       TaggedLink tagged = parseTaggedLink(x);
       std::string link = tagged.link.empty() ? x : tagged.link;
 
-      // 检查是否是节点链接（以协议前缀开头）
-      bool isNodeLink =
-          startsWith(link, "vless://") || startsWith(link, "vmess://") ||
-          startsWith(link, "ss://") || startsWith(link, "ssr://") ||
-          startsWith(link, "trojan://") || startsWith(link, "hysteria://") ||
-          startsWith(link, "hysteria2://") || startsWith(link, "hy2://") ||
-          startsWith(link, "tuic://") || startsWith(link, "snell://") ||
-          startsWith(link, "socks5://") || startsWith(link, "socks://");
+      // Keep HTTP(S)/data links available for proxy-provider mode. Other
+      // Mihomo-supported schemes are direct node links.
+      bool isNodeLink = mihomo::isSupportedNonHttpSchemeLink(link);
 
       if (isNodeLink) {
         std::string node_link = link;
@@ -1684,7 +2047,8 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
         writeLog(0, "检测到节点链接：'" + link + "'，将直接解析。",
                  LOG_LEVEL_INFO);
         node_urls.push_back(node_link);
-      } else if (isLink(link)) {
+        explain.node_link_count++;
+      } else if (isLink(link) || mihomo::isHttpSchemeLink(link)) {
         // HTTP/HTTPS 订阅链接
         writeLog(
             0, "检测到订阅链接：'" + link + "'，将创建 provider。",
@@ -1707,6 +2071,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
             {link, tagged.tag, tagged.provider, per_url_ua, per_url_proxy,
              per_url_interval, per_url_provider_mode, per_url_provider_explicit,
              per_url_interval_explicit, tagged.link_decoded});
+        explain.subscription_url_count++;
       } else {
         std::string node_link = link;
         if (tagged.has_tag)
@@ -1714,6 +2079,8 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
         writeLog(0, "未知 URL 类型：'" + link + "'，按节点链接处理。",
                  LOG_LEVEL_WARNING);
         node_urls.push_back(node_link);
+        explain.node_link_count++;
+        explain.unknown_node_link_count++;
       }
     }
 
@@ -1785,16 +2152,8 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
           int global_proxys_interval = to_int(argProxysInterval, -1);
           if (item.interval_explicit && per_url_interval_int > 0) {
             provider.interval = per_url_interval_int;
-            writeLog(0,
-                     "  -> 使用每 URL 间隔设置 provider '" + provider.name +
-                         "': '" + item.interval + "'",
-                     LOG_LEVEL_INFO);
           } else if (!argProxysInterval.empty() && global_proxys_interval > 0) {
             provider.interval = global_proxys_interval;
-            writeLog(0,
-                     "  -> 使用全局 &proxys-interval 设置 provider '" +
-                         provider.name + "': '" + argProxysInterval + "'",
-                     LOG_LEVEL_INFO);
           } else {
             provider.interval = 43200;
           }
@@ -1802,31 +2161,15 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
           // UA: per-URL |ua > &proxys-ua=
           if (!item.ua.empty()) {
             provider.user_agent = item.ua;
-            writeLog(0,
-                     "  -> 使用每 URL UA 设置 provider '" + provider.name +
-                         "': '" + item.ua + "'",
-                     LOG_LEVEL_INFO);
           } else if (!argProxysUA.empty()) {
             provider.user_agent = argProxysUA;
-            writeLog(0,
-                     "  -> 使用全局 &proxys-ua 设置 provider '" +
-                         provider.name + "': '" + argProxysUA + "'",
-                     LOG_LEVEL_INFO);
           }
 
           // Proxy: per-URL |proxy > &proxys-proxy=
           if (!item.proxy.empty()) {
             provider.proxy = item.proxy;
-            writeLog(0,
-                     "  -> 使用每 URL 代理设置 provider '" + provider.name +
-                         "': '" + item.proxy + "'",
-                     LOG_LEVEL_INFO);
           } else if (!argProxysProxy.empty()) {
             provider.proxy = argProxysProxy;
-            writeLog(0,
-                     "  -> 使用全局 &proxys-proxy 设置 provider '" +
-                         provider.name + "': '" + argProxysProxy + "'",
-                     LOG_LEVEL_INFO);
           }
 
           provider.groupId = groupID;
@@ -1838,6 +2181,16 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
             provider.exclude_filter = argExcludeRemark;
 
           ext.providers.push_back(provider);
+          SubExplainProvider explain_provider;
+          explain_provider.name = provider.name;
+          explain_provider.tag = provider.tag;
+          explain_provider.source_hash = shortHash(provider.url);
+          explain_provider.path = provider.path;
+          explain_provider.filter = provider.filter;
+          explain_provider.exclude_filter = provider.exclude_filter;
+          explain_provider.group_id = provider.groupId;
+          explain_provider.interval = provider.interval;
+          explain.providers.push_back(std::move(explain_provider));
           groupID++;
         } else {
           // ====== SERVER-SIDE FETCH ======
@@ -1919,6 +2272,10 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
   }
   // exit if found nothing
   // 对于 proxy-provider 模式，允许 nodes 为空（节点从 provider 获取）
+  explain.provider_count = ext.providers.size();
+  explain.proxy_provider_mode = ext.use_proxy_provider && !ext.providers.empty();
+  explain.insert_node_count = insert_nodes.size();
+  explain.direct_node_count = nodes.size();
   if (nodes.empty() && insert_nodes.empty() && ext.providers.empty()) {
     *status_code = 400;
     return "Invalid request: no valid proxy nodes or proxy providers were "
@@ -2006,6 +2363,7 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
 
   // do pre-process now
   preprocessNodes(nodes, ext);
+  explain.total_node_count = nodes.size();
 
   /*
   //insert node info to template
@@ -2268,6 +2626,277 @@ static std::string subconverter_impl(RESPONSE_CALLBACK_ARGS) {
            "请将该请求反馈给服务维护者。";
   }
   writeLog(0, "生成完成。", LOG_LEVEL_INFO);
+  if (explainMode) {
+    auto hasArg = [&](const std::string &name) {
+      return argument.find(name) != argument.end();
+    };
+    auto rawArg = [&](const std::string &name) {
+      return getUrlArg(argument, name);
+    };
+    auto addParameter = [&](const std::string &name,
+                            const std::string &effective_value,
+                            const std::string &status,
+                            const std::string &note,
+                            bool sensitive = false,
+                            const std::string &source = "request") {
+      if (!hasArg(name))
+        return;
+      std::string raw_value = rawArg(name);
+      std::string decoded_value = urlDecode(raw_value);
+      SubExplainParameter parameter;
+      parameter.name = name;
+      parameter.present = true;
+      parameter.source = source;
+      parameter.status = status;
+      parameter.value_preview = previewExplainValue(raw_value, sensitive);
+      parameter.value_hash = shortHash(decoded_value);
+      parameter.raw_length = raw_value.size();
+      parameter.value_length = decoded_value.size();
+      parameter.effective_value = effective_value;
+      parameter.note = note;
+      parameter.sensitive = sensitive;
+      explain.recognized_parameters.push_back(std::move(parameter));
+    };
+    auto addSwitchParameter = [&](const std::string &name, bool effective_value,
+                                  const tribool &arg_value,
+                                  const std::string &note = "") {
+      addParameter(name, boolString(effective_value),
+                   arg_value.is_undef() ? "defaulted" : "applied", note);
+    };
+    auto addConfigSection = [&](const std::string &name,
+                                const std::string &source,
+                                const std::string &status,
+                                const std::string &detail) {
+      SubExplainConfigSection section;
+      section.name = name;
+      section.source = source;
+      section.status = status;
+      section.detail = detail;
+      explain.effective_config_sections.push_back(std::move(section));
+    };
+
+    addParameter("target", argTarget,
+                 explain.requested_target != argTarget ? "resolved" : "applied",
+                 explain.requested_target != argTarget
+                     ? "target=auto was resolved from the User-Agent"
+                     : "");
+    addParameter("url",
+                 std::to_string(explain.raw_url_count) +
+                     " source item(s), " +
+                     std::to_string(explain.subscription_url_count) +
+                     " subscription(s), " +
+                     std::to_string(explain.node_link_count) + " node link(s)",
+                 "applied",
+                 "Sensitive values are redacted; use hash and length to "
+                 "compare inputs.",
+                 true);
+    addParameter("explain", "true", "applied",
+                 "The request returned a JSON diagnostic report.");
+    addParameter("ver", std::to_string(intSurgeVer), "applied",
+                 "Surge-compatible target version.");
+    addParameter("new_name", boolString(ext.clash_new_field_name),
+                 argClashNewField.is_undef() ||
+                         argClashNewField.get(false) == ext.clash_new_field_name
+                     ? "applied"
+                     : "overridden",
+                 "Mihomo-compatible field names are forced for Clash output.");
+    addParameter("group", argGroupName,
+                 argGroupName.empty() ? "ignored" : "applied",
+                 "Overrides the group name on direct nodes.");
+    addParameter("upload_path", argUploadPath,
+                 argUpload ? "applied" : "ignored",
+                 "Only used when upload is effective.", true);
+    addParameter("include", argIncludeRemark,
+                 !argIncludeRemark.empty() && regValid(argIncludeRemark)
+                     ? "applied"
+                     : "ignored",
+                 "Used as node/provider include filter when valid.");
+    addParameter("exclude", argExcludeRemark,
+                 !argExcludeRemark.empty() && regValid(argExcludeRemark)
+                     ? "applied"
+                     : "ignored",
+                 "Used as node/provider exclude filter when valid.");
+    addParameter("groups", std::to_string(lCustomProxyGroups.size()) +
+                              " custom group(s)",
+                 configLoadSuccess ? "ignored" : "applied",
+                 configLoadSuccess
+                     ? "External config loaded; request groups were not used."
+                     : "Decoded from URL-safe base64.");
+    addParameter("ruleset", std::to_string(lRulesetContent.size()) +
+                                " loaded ruleset(s)",
+                 configLoadSuccess ? "ignored" : "applied",
+                 configLoadSuccess
+                     ? "External config loaded; request rulesets were not used."
+                     : "Decoded from URL-safe base64.");
+    std::string config_effective = explain.external_config_loaded
+                                       ? "loaded"
+                                       : "not loaded";
+    if (explain.fallback_config_used)
+      config_effective = "fallback loaded";
+    addParameter("config", config_effective,
+                 explain.external_config_loaded ? "applied" : "ignored",
+                 explain.fallback_config_used
+                     ? "User config failed and a fallback config was loaded."
+                     : "External config URL or data source.",
+                 true);
+    addParameter("dev_id", ext.quanx_dev_id,
+                 ext.quanx_dev_id.empty() ? "ignored" : "applied",
+                 "Quantumult X device id.");
+    addParameter("filename", argFilename, "ignored",
+                 "Content-Disposition is not emitted for explain JSON.");
+    addParameter("interval", std::to_string(interval), "applied",
+                 "Effective update interval in seconds.");
+    addParameter("strict", boolString(strict), "applied",
+                 "Managed config strict flag.");
+    addParameter("rename", std::to_string(ext.rename_array.size()) +
+                               " rename rule(s)",
+                 argRenames.empty() ? "ignored" : "applied",
+                 "Request rename rules override configured rename rules.");
+    addParameter("filter_script",
+                 authorized && !argFilterScript.empty() ? "script accepted"
+                                                        : "not used",
+                 authorized ? "applied" : "ignored",
+                 "Public requests cannot provide executable filter scripts.",
+                 true);
+    addParameter("upload", boolString(argUpload), explain.upload_suppressed
+                                                    ? "suppressed"
+                                                    : "applied",
+                 explain.upload_suppressed
+                     ? "Uploads are disabled in explain mode."
+                     : "");
+    addParameter("emoji", boolString(ext.add_emoji), "applied",
+                 "Sets add_emoji and remove_emoji together.");
+    addSwitchParameter("add_emoji", ext.add_emoji, argAddEmoji);
+    addSwitchParameter("remove_emoji", ext.remove_emoji, argRemoveEmoji);
+    addSwitchParameter("append_type", ext.append_proxy_type, argAppendType);
+    addSwitchParameter("tfo", ext.tfo.get(false), ext.tfo);
+    addSwitchParameter("udp", ext.udp.get(false), ext.udp);
+    addParameter("list", boolString(ext.nodelist),
+                 isTruthyRequestValue(rawArg("list")) && !ext.nodelist
+                     ? "overridden"
+                     : "applied",
+                 "This project forces provider mode for Clash-compatible "
+                 "output.");
+    addSwitchParameter("sort", ext.sort_flag, argSort);
+    addParameter("sort_script",
+                 argUseSortScript ? "enabled" : "disabled",
+                 argUseSortScript ? "applied" : "ignored",
+                 "Uses configured sort script when sorting is enabled.");
+    addSwitchParameter("script", ext.clash_script, argGenClashScript);
+    addSwitchParameter("insert", argEnableInsert.get(global.enableInsert),
+                       argEnableInsert);
+    addSwitchParameter("scv", ext.skip_cert_verify.get(false),
+                       ext.skip_cert_verify);
+    addSwitchParameter("fdn", ext.filter_deprecated, argFilterDeprecated);
+    addSwitchParameter("expand", explain.expand_rulesets, argExpandRulesets);
+    addSwitchParameter("append_info",
+                       argAppendUserinfo.get(global.appendUserinfo),
+                       argAppendUserinfo);
+    addSwitchParameter("prepend", argPrependInsert.get(global.prependInsert),
+                       argPrependInsert);
+    addSwitchParameter("tls13", ext.tls13.get(false), ext.tls13);
+    addSwitchParameter("provider_proxy_direct", ext.provider_proxy_direct,
+                       argProviderProxyDirect);
+    addParameter("profile_data", managed_url.empty() ? "not used" : "provided",
+                 managed_url.empty() ? "ignored" : "applied",
+                 "Managed config URL override.", true);
+
+    const std::unordered_set<std::string> known_parameters = {
+        "target", "url", "ver", "new_name", "group", "upload_path",
+        "include", "exclude", "groups", "ruleset", "config", "dev_id",
+        "filename", "interval", "strict", "rename", "filter_script",
+        "upload", "emoji", "add_emoji", "remove_emoji", "append_type",
+        "tfo", "udp", "list", "sort", "sort_script", "script", "insert",
+        "scv", "fdn", "expand", "append_info", "prepend", "classic",
+        "tls13", "provider_proxy_direct", "explain", "profile_data",
+        "token"};
+    for (const auto &arg : argument) {
+      if (known_parameters.find(arg.first) != known_parameters.end())
+        continue;
+      std::string decoded_value = urlDecode(arg.second);
+      SubExplainParameter parameter;
+      parameter.name = arg.first;
+      parameter.present = true;
+      parameter.source = "request";
+      parameter.status = "ignored";
+      parameter.value_preview = previewExplainValue(arg.second, false);
+      parameter.value_hash = shortHash(decoded_value);
+      parameter.raw_length = arg.second.size();
+      parameter.value_length = decoded_value.size();
+      parameter.effective_value = "";
+      parameter.note = "This parameter is not recognized by /sub.";
+      parameter.sensitive = false;
+      explain.unrecognized_parameters.push_back(std::move(parameter));
+    }
+
+    if (explain.fallback_config_used)
+      explain.effective_config_source = "fallback";
+    else if (explain.external_config_loaded && userProvidedExternalConfig)
+      explain.effective_config_source = "request";
+    else if (explain.external_config_loaded && !global.defaultExtConfig.empty())
+      explain.effective_config_source = "default";
+    else if (userProvidedExternalConfig)
+      explain.effective_config_source = "request_failed";
+    else
+      explain.effective_config_source = "none";
+
+    if (explain.external_config_provided || explain.external_config_loaded) {
+      addConfigSection("external_config", explain.effective_config_source,
+                       explain.external_config_loaded ? "loaded" : "not_loaded",
+                       explain.fallback_config_used
+                           ? "Fallback config was used."
+                           : (userProvidedExternalConfig
+                                  ? "User-provided config was evaluated."
+                                  : "Default external config was evaluated."));
+    }
+    addConfigSection("base_template", explain.base_fetch_context, "selected",
+                     "Base template fetch context for target " + argTarget +
+                         ".");
+    if (explain.rule_generator_enabled)
+      addConfigSection("rulesets", explain.ruleset_fetch_context, "loaded",
+                       std::to_string(explain.ruleset_count) +
+                           " ruleset(s).");
+    if (explain.custom_group_count)
+      addConfigSection("custom_groups", "effective", "loaded",
+                       std::to_string(explain.custom_group_count) +
+                           " custom group(s).");
+    if (!ext.rename_array.empty())
+      addConfigSection("rename", argRenames.empty() ? "configured" : "request",
+                       "loaded",
+                       std::to_string(ext.rename_array.size()) +
+                           " rename rule(s).");
+    if (!ext.emoji_array.empty())
+      addConfigSection("emoji", "configured", "loaded",
+                       std::to_string(ext.emoji_array.size()) +
+                           " emoji rule(s).");
+    if (!lIncludeRemarks.empty() || !lExcludeRemarks.empty())
+      addConfigSection("filters", "effective", "loaded",
+                       std::to_string(lIncludeRemarks.size()) +
+                           " include filter(s), " +
+                           std::to_string(lExcludeRemarks.size()) +
+                           " exclude filter(s).");
+    if (explain.provider_count)
+      addConfigSection("proxy_providers", "request", "generated",
+                       std::to_string(explain.provider_count) +
+                           " provider(s).");
+    if (explain.managed_config)
+      addConfigSection("managed_config", "global", "enabled",
+                       "Managed config prefix is available.");
+
+    explain.output_bytes = output_content.size();
+    writeLog(0,
+             "已生成 /sub explain JSON 诊断结果：target=" + argTarget +
+                 ", status=" + std::to_string(response.status_code) +
+                 ", providers=" + std::to_string(explain.provider_count) +
+                 ", nodes=" + std::to_string(explain.total_node_count) +
+                 ", recognized_params=" +
+                 std::to_string(explain.recognized_parameters.size()) +
+                 ", unrecognized_params=" +
+                 std::to_string(explain.unrecognized_parameters.size()) + "。",
+             LOG_LEVEL_INFO);
+    response.content_type = "application/json; charset=utf-8";
+    return serializeSubExplainReport(explain, response);
+  }
   if (!argFilename.empty())
     response.headers.emplace("Content-Disposition",
                              "attachment; filename=\"" + argFilename +

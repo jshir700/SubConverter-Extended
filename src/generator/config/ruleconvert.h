@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_set>
 #include <future>
+#include <cstdint>
 
 #include <yaml-cpp/yaml.h>
 #include <rapidjson/document.h>
@@ -37,13 +38,19 @@ struct RulesetContent
     bool provider_override = false;
 };
 
+struct RuleConversionStats
+{
+    uint64_t rules = 0;
+    void add(uint64_t count = 1) { rules += count; }
+};
+
 std::string convertRuleset(const std::string &content, int type);
 std::string getRuleKey(const std::string &rule);
 std::string appendClashRuleTarget(const std::string &rule, const std::string &target, bool no_resolve_only = false);
-void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, bool dedup = true);
-std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, bool dedup = true);
-void rulesetToSurge(INIReader &base_rule, std::vector<RulesetContent> &ruleset_content_array, int surge_ver, bool overwrite_original_rules, const std::string& remote_path_prefix);
-void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules);
+void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, bool dedup = true, RuleConversionStats *stats = nullptr);
+std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, bool dedup = true, RuleConversionStats *stats = nullptr);
+void rulesetToSurge(INIReader &base_rule, std::vector<RulesetContent> &ruleset_content_array, int surge_ver, bool overwrite_original_rules, const std::string& remote_path_prefix, RuleConversionStats *stats = nullptr);
+void rulesetToSingBox(rapidjson::Document &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, RuleConversionStats *stats = nullptr);
 
 // Clash-supported rule type prefixes — used to filter non-Clash types from inline expansion
 extern const string_array ClashRuleTypes;
