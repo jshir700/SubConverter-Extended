@@ -3327,6 +3327,13 @@ static SubStageResponse processSubscriptionNodes(
       bool has_interval = false;
       bool has_proxy_direct = false;
       bool url_decoded = false;
+      // jshir700: per-URL inline parameters
+      std::string per_url_ua;
+      std::string per_url_proxy;
+      int per_url_interval = 0;
+      bool per_url_provider_mode = true;
+      bool per_url_provider_explicit = false;
+      bool per_url_interval_explicit = false;
     };
     std::vector<SubscriptionLinkItem> subscription_urls;
     std::vector<std::string> node_urls;
@@ -3359,12 +3366,52 @@ static SubStageResponse processSubscriptionNodes(
         node_urls.push_back(node_link);
         explain.node_link_count++;
       } else if (isLink(link) || mihomo::isHttpSchemeLink(link)) {
+        // jshir700: parse per-URL inline parameters
+        std::string per_url_ua, per_url_proxy;
+        int per_url_interval = 0;
+        bool per_url_provider_mode = true;
+        bool per_url_provider_explicit = false;
+        bool per_url_interval_explicit = false;
+
+        // Check for inline params (|key:value;key:value)
+        size_t pipe_pos = x.find('|');
+        if (pipe_pos != std::string::npos) {
+          std::string inline_params = x.substr(pipe_pos + 1);
+          x = x.substr(0, pipe_pos);
+          // Re-parse tagged link after stripping params
+          tagged = parseTaggedLink(regTrim(x));
+          link = tagged.link.empty() ? x : tagged.link;
+
+          // Parse inline parameters
+          string_array parts = split(inline_params, ";");
+          for (const std::string &part : parts) {
+            size_t colon_pos = part.find(':');
+            if (colon_pos == std::string::npos) continue;
+            std::string key = part.substr(0, colon_pos);
+            std::string val = part.substr(colon_pos + 1);
+            if (key == "ua") {
+              per_url_ua = val;
+            } else if (key == "proxy") {
+              per_url_proxy = val;
+            } else if (key == "provider") {
+              per_url_provider_mode = (val != "false");
+              per_url_provider_explicit = true;
+            } else if (key == "interval") {
+              per_url_interval = to_int(val, 0);
+              per_url_interval_explicit = true;
+            }
+          }
+        }
+
         writeLog(LOG_LEVEL_INFO, "检测到订阅链接：" + summarizeUrlForLog(link) +
                         "，将创建 provider。");
         subscription_urls.push_back(
             {link, tagged.tag, tagged.provider, tagged.interval,
              tagged.proxy_direct, tagged.has_interval, tagged.has_proxy_direct,
-             tagged.link_decoded});
+             tagged.link_decoded,
+             per_url_ua, per_url_proxy, per_url_interval,
+             per_url_provider_mode, per_url_provider_explicit,
+             per_url_interval_explicit});
         explain.subscription_url_count++;
       } else {
         if (tagged.has_interval) {
@@ -3420,6 +3467,48 @@ static SubStageResponse processSubscriptionNodes(
       size_t generated_explain_provider_index = 0;
 
       for (const SubscriptionLinkItem &item : subscription_urls) {
+        // jshir700: per-URL provider mode override
+        bool url_provider_mode;
+        if (item.per_url_provider_explicit)
+          url_provider_mode = item.per_url_provider_mode;
+        else if (!argProxysProvider.empty())
+          url_provider_mode = (argProxysProvider != "false");
+        else
+          url_provider_mode = true;
+
+        if (!url_provider_mode) {
+          // Server-side fetch mode: apply per-URL UA/proxy to parse_set
+          auto orig_ua = parse_set.custom_user_agent;
+          auto orig_proxy = parse_set.proxy;
+          std::string effective_ua, effective_proxy;
+
+          if (!item.per_url_ua.empty()) {
+            effective_ua = item.per_url_ua;
+            parse_set.custom_user_agent = &effective_ua;
+          } else if (!resolved_ua.empty()) {
+            effective_ua = resolved_ua;
+            parse_set.custom_user_agent = &effective_ua;
+          }
+          if (!item.per_url_proxy.empty()) {
+            effective_proxy = item.per_url_proxy;
+            parse_set.proxy = &effective_proxy;
+          }
+
+          std::string node_link = item.url;
+          if (!item.tag.empty())
+            node_link = "tag:" + item.tag + "," + node_link;
+          writeLog(LOG_LEVEL_INFO, "正在从 URL 获取节点数据：" + node_link + "。");
+          if (addNodes(node_link, nodes, groupID, parse_set) == -1) {
+            writeLog(LOG_LEVEL_WARNING,
+                     "已跳过无效节点链接：" + node_link + "，继续处理其他节点。");
+          }
+          groupID++;
+
+          parse_set.custom_user_agent = orig_ua;
+          parse_set.proxy = orig_proxy;
+          continue;
+        }
+
         ProxyProvider provider;
         std::string urlHash =
             item.url_decoded ? generateProviderHashFromDecodedUrl(item.url)
@@ -3436,13 +3525,21 @@ static SubStageResponse processSubscriptionNodes(
         provider.tag = item.tag;
         provider.url = item.url_decoded ? item.url : urlDecode(item.url);
         provider.interval = static_cast<uint32_t>(
-            item.has_interval ? item.interval : settings.proxyProviderInterval);
+            item.per_url_interval_explicit && item.per_url_interval > 0
+                ? item.per_url_interval
+                : (!argProxysInterval.empty()
+                       ? to_int(argProxysInterval, -1) > 0
+                             ? to_int(argProxysInterval, 0)
+                             : settings.proxyProviderInterval
+                       : settings.proxyProviderInterval));
         provider.proxy_direct =
             item.has_proxy_direct ? item.proxy_direct
                                   : ext.provider_proxy_direct;
         provider.groupId = groupID;
         provider.path = "./providers/" + provider.name + ".yaml";
-        provider.user_agent = provider_user_agent;
+        // jshir700: per-URL UA has priority over global resolved_ua
+        std::string final_ua = item.per_url_ua.empty() ? resolved_ua : item.per_url_ua;
+        provider.user_agent = final_ua.empty() ? provider_user_agent : final_ua;
         provider.headers = provider_headers;
         provider.filter = buildProviderRemarkFilter(lIncludeRemarks);
         provider.exclude_filter =
