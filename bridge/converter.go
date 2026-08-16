@@ -66,7 +66,8 @@ func ConvertSubscription(data *C.char) (result *C.char) {
 	// Preprocess subscription to fix URL encoding issues (e.g., v2rayN exported links)
 	subscription = preprocessSubscription(subscription)
 
-	proxies, err := parseSubscriptionWithMihomo(subscription)
+	// Call mihomo's converter
+	proxies, err := convert.ConvertsV2Ray([]byte(subscription))
 	if err != nil {
 		errJSON, _ := json.Marshal(map[string]string{
 			"error": err.Error(),
