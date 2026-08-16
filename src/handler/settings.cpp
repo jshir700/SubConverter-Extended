@@ -526,8 +526,14 @@ int importItems(string_array &target, bool scope_limit, FetchContext context) {
 }
 
 toml::value parseToml(const std::string &content, const std::string &fname) {
-  std::istringstream is(content);
-  return toml::parse(is, fname);
+  try {
+    std::istringstream is(content);
+    return toml::parse(is, fname);
+  } catch (toml::exception &e) {
+    writeLog(0, "TOML parse failed for '" + fname + "': " + std::string(e.what()),
+             LOG_LEVEL_DEBUG);
+    return toml::value();
+  }
 }
 
 int importItems(std::vector<toml::value> &root, const std::string &import_key,
@@ -1180,8 +1186,8 @@ void readTOMLConf(toml::value &root,
 
   find_if_exist(section_common, "default_url", default_url, "insert_url",
                 insert_url);
-  global.defaultUrls = join(default_url, "|");
-  global.insertUrls = join(insert_url, "|");
+  global.defaultUrls = join(default_url, "||");
+  global.insertUrls = join(insert_url, "||");
 
   bool filter = false;
   // api_mode and api_access_token removed - hardcoded in settings.h

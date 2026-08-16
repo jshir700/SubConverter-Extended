@@ -21,6 +21,6 @@ int render_template(const std::string &content, const template_args &vars,
                     const std::string &include_scope = "templates",
                     FetchContext context = FetchContext::TrustedConfig,
                     bool *fetch_failed = nullptr);
-int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules, bool clash_classic_ruleset, RuleConversionStats *stats = nullptr);
+int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules, bool clash_classic_ruleset, RuleConversionStats *stats = nullptr, bool dedup = true);
 
 #endif // TEMPLATES_H_INCLUDED

@@ -877,7 +877,7 @@ static inline void curl_set_common_options(CURL *curl_handle, const char *url, c
                      effectiveSettings().allowInsecureTls ? 0L : 1L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST,
                      effectiveSettings().allowInsecureTls ? 0L : 2L);
-    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, global.fetch_timeout);
     curl_easy_setopt(curl_handle, CURLOPT_COOKIEFILE, "");
     if(data)
     {

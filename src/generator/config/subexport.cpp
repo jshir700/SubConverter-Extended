@@ -1907,7 +1907,7 @@ std::string proxyToClash(std::vector<Proxy> &nodes,
         yamlnode, ruleset_content_array, ext.managed_config_prefix,
         ext.clash_script,
         has_external_rules ? true : ext.overwrite_original_rules,
-        ext.clash_classical_ruleset, ext.rule_stats);
+        ext.clash_classical_ruleset, ext.rule_stats, ext.dedup);
     if (has_external_rules) {
       string_array generated_rules;
       if (yamlnode[rules_field_name].IsDefined() &&
@@ -1923,7 +1923,7 @@ std::string proxyToClash(std::vector<Proxy> &nodes,
   if (has_external_rules) {
     yamlnode.remove(rules_field_name);
     rulesetToClash(yamlnode, ruleset_content_array, true,
-                   ext.clash_new_field_name, ext.rule_stats);
+                   ext.clash_new_field_name, ext.rule_stats, ext.dedup);
     string_array generated_rules;
     if (yamlnode[rules_field_name].IsDefined() &&
         yamlnode[rules_field_name].IsSequence())
@@ -1937,7 +1937,7 @@ std::string proxyToClash(std::vector<Proxy> &nodes,
   std::string output_content =
       rulesetToClashStr(yamlnode, ruleset_content_array,
                         ext.overwrite_original_rules, ext.clash_new_field_name,
-                        ext.rule_stats);
+                        ext.rule_stats, ext.dedup);
 
   // 提取 proxy-providers，手动控制输出顺序
   // 使用之前在 998-1002 行已提取的 proxy_providers_yaml

@@ -56,6 +56,8 @@ struct Settings {
   std::string basePath = "base";
   std::string custom_group;
   LogLevel logLevel = LOG_LEVEL_INFO;
+  long fetch_timeout = 15L;  // jshir700: request timeout (seconds)
+  std::string user_agent;    // jshir700: global User-Agent override
   long maxAllowedDownloadSize = 1048576L;
   string_map aliases;
   std::string serveFileRoot;

@@ -6,64 +6,65 @@ package main
 import "C"
 import (
 	"encoding/json"
-	"runtime/debug"
+	"fmt"
+	"net/url"
+	"strings"
 	"unsafe"
+
+	"github.com/metacubex/mihomo/common/convert"
 )
 
-// ReleaseUnusedMemory forces the embedded Go runtime to return unused heap
-// pages after an unusually large subscription parse.
-//
-//export ReleaseUnusedMemory
-func ReleaseUnusedMemory() {
-	debug.FreeOSMemory()
-}
+// preprocessSubscription fixes URL encoding issues in subscription links
+// Decodes the entire URL line to ensure Mihomo parser receives properly unencoded links
+func preprocessSubscription(subscription string) string {
+	lines := strings.Split(subscription, "\n")
+	var result []string
 
-// ResolveAgeRecipient validates one Age public or secret key and returns a
-// canonical public recipient plus a SHA-256 fingerprint. Errors intentionally
-// do not include the supplied key.
-//
-//export ResolveAgeRecipient
-func ResolveAgeRecipient(key *C.char) *C.char {
-	if key == nil {
-		result, _ := json.Marshal(ageRecipientResult{Error: "invalid age key"})
-		return C.CString(string(result))
+	for _, line := range lines {
+		line = strings.TrimRight(line, " \r")
+		if line == "" {
+			result = append(result, line)
+			continue
+		}
+
+		// Decode the entire URL line
+		// This fixes issues like v2rayN's uuid%3Apassword encoding
+		// Safe for all protocols: url.QueryUnescape only decodes %XX patterns
+		// and leaves structural characters (://, @, ?, #) intact
+		if decoded, err := url.QueryUnescape(line); err == nil {
+			line = decoded
+		}
+		// If decoding fails (malformed %), keep original line
+
+		result = append(result, line)
 	}
 
-	resolved, err := resolveAgeRecipient(C.GoString(key))
-	if err != nil {
-		resolved = ageRecipientResult{Error: err.Error()}
-	}
-	result, _ := json.Marshal(resolved)
-	return C.CString(string(result))
-}
-
-// EncryptAgeArmored encrypts a successful configuration response using the
-// resolved public recipient. The OK/ERROR prefix keeps the C boundary simple;
-// valid armored output can never be confused with an error.
-//
-//export EncryptAgeArmored
-func EncryptAgeArmored(data *C.char, recipient *C.char) *C.char {
-	if data == nil || recipient == nil {
-		return C.CString("ERROR\ninvalid age encryption input")
-	}
-
-	encrypted, err := encryptAgeArmored(C.GoString(data), C.GoString(recipient))
-	if err != nil {
-		return C.CString("ERROR\n" + err.Error())
-	}
-	return C.CString("OK\n" + encrypted)
+	return strings.Join(result, "\n")
 }
 
 // ConvertSubscription parses native Mihomo provider YAML or URI subscriptions.
 //
 //export ConvertSubscription
-func ConvertSubscription(data *C.char) *C.char {
+func ConvertSubscription(data *C.char) (result *C.char) {
+	// Recover from panics in mihomo library to prevent crashing the entire process
+	defer func() {
+		if r := recover(); r != nil {
+			errJSON, _ := json.Marshal(map[string]string{
+				"error": "mihomo parser panic: " + fmt.Sprint(r),
+			})
+			result = C.CString(string(errJSON))
+		}
+	}()
+
 	if data == nil {
 		return C.CString(`{"error": "null input"}`)
 	}
 
 	// Convert C string to Go string
 	subscription := C.GoString(data)
+
+	// Preprocess subscription to fix URL encoding issues (e.g., v2rayN exported links)
+	subscription = preprocessSubscription(subscription)
 
 	proxies, err := parseSubscriptionWithMihomo(subscription)
 	if err != nil {
@@ -74,7 +75,7 @@ func ConvertSubscription(data *C.char) *C.char {
 	}
 
 	// Marshal result to JSON
-	result, err := json.Marshal(proxies)
+	marshaled, err := json.Marshal(proxies)
 	if err != nil {
 		errJSON, _ := json.Marshal(map[string]string{
 			"error": "failed to marshal result: " + err.Error(),
@@ -82,7 +83,7 @@ func ConvertSubscription(data *C.char) *C.char {
 		return C.CString(string(errJSON))
 	}
 
-	return C.CString(string(result))
+	return C.CString(string(marshaled))
 }
 
 // FreeString frees memory allocated by Go (must be called from C++ after using the result)

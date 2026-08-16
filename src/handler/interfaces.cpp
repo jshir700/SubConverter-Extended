@@ -373,6 +373,15 @@ static std::string buildProviderRemarkFilter(const string_array &rules) {
 
 extern string_array ClashRuleTypes, SurgeRuleTypes, QuanXRuleTypes;
 
+// jshir700: parse a proxy string (SYSTEM/NONE/URL) into a proxy policy
+static std::string parseProxyString(const std::string &source) {
+  if (source == "SYSTEM")
+    return ""; // use system proxy
+  if (source == "NONE")
+    return ""; // direct
+  return source;
+}
+
 std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
   SettingsSnapshot snapshot = captureEffectiveSettingsSnapshot();
   ScopedSettingsView settings_scope(std::move(snapshot));
@@ -384,8 +393,12 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
   std::string url = urlSafeBase64Decode(getUrlArg(argument, "url")),
               type = getUrlArg(argument, "type"),
               group = urlSafeBase64Decode(getUrlArg(argument, "group"));
-  std::string output_content;
+  // jshir700: support &ua=, &fetch_timeout=, &dedup= parameters
+  std::string argUserAgent = getUrlArg(argument, "ua"),
+              argFetchTimeout = getUrlArg(argument, "fetch_timeout");
+  std::string output_content, dummy;
   int type_int = to_int(type, 0);
+  tribool argDedup = getUrlArg(argument, "dedup");
 
   if (url.empty() || type.empty() || (type_int == 2 && group.empty()) ||
       (type_int < 1 || type_int > 6)) {
@@ -396,15 +409,61 @@ std::string getRuleset(RESPONSE_CALLBACK_ARGS) {
            "必须提供 url 和 type=1..6；当 type=2 时还必须提供 group。";
   }
 
+  // jshir700: temporary timeout override
+  long saved_timeout = global.fetch_timeout;
+  if (!argFetchTimeout.empty()) {
+    long ft = to_int(argFetchTimeout, 0);
+    if (ft > 0)
+      global.fetch_timeout = ft;
+  }
+
   string_array vArray = split(url, "|");
   for (std::string &x : vArray)
     x.insert(0, "ruleset,");
   std::vector<RulesetContent> rca;
   RulesetConfigs confs = INIBinding::from<RulesetConfig>::from_ini(vArray);
+
+  // jshir700: apply UA to ruleset configs
+  std::string effective_ua = argUserAgent;
+  if (effective_ua.empty() && request.headers.contains("User-Agent"))
+    effective_ua = request.headers.at("User-Agent");
+  if (!effective_ua.empty()) {
+    for (auto &cfg : confs) {
+      if (cfg.UserAgent.empty())
+        cfg.UserAgent = effective_ua;
+    }
+  }
+
   refreshRulesets(confs, rca, FetchContext::PublicRequest);
   for (RulesetContent &x : rca) {
     std::string content = x.rule_content.get();
     output_content += convertRuleset(content, x.rule_type);
+  }
+  global.fetch_timeout = saved_timeout;
+
+  // jshir700: apply dedup to output
+  if (argDedup.get(true) && !output_content.empty()) {
+    std::unordered_set<std::string> seenRulesExact;
+    std::string deduped;
+    std::istringstream stream(output_content);
+    std::string line;
+    while (std::getline(stream, line)) {
+      if (line.empty()) continue;
+      // Extract rule key (type,value excluding target)
+      size_t pos = line.find(',');
+      if (pos == std::string::npos) continue;
+      size_t pos2 = line.find(',', pos + 1);
+      std::string key;
+      if (pos2 == std::string::npos) {
+        key = line;
+      } else {
+        key = line.substr(0, pos2);
+      }
+      if (seenRulesExact.emplace(key).second) {
+        deduped += line + "\n";
+      }
+    }
+    output_content = deduped;
   }
 
   if (output_content.empty()) {
@@ -1973,6 +2032,43 @@ static std::string parseSubRequestArguments(Request &request,
   parsed.tls13 = getUrlArg(argument, "tls13");
   parsed.provider_proxy_direct =
       getUrlArg(argument, "provider_proxy_direct");
+  // jshir700: global parameter overrides
+  std::string argGlobalUA = getUrlArg(argument, "global-ua");
+  std::string argFetchTimeout = getUrlArg(argument, "fetch_timeout");
+  std::string argProxysProvider = getUrlArg(argument, "proxys-provider");
+  std::string argProxysUA = getUrlArg(argument, "proxys-ua");
+  std::string argProxysProxy = getUrlArg(argument, "proxys-proxy");
+  std::string argProxysInterval = getUrlArg(argument, "proxys-interval");
+  std::string argRulesProvider = getUrlArg(argument, "rules-provider");
+  std::string argRulesUA = getUrlArg(argument, "rules-ua");
+  std::string argRulesProxy = getUrlArg(argument, "rules-proxy");
+  std::string argRulesInterval = getUrlArg(argument, "rules-interval");
+  tribool argDedup = getUrlArg(argument, "dedup");
+
+  // Apply global-ua to config
+  if (!argGlobalUA.empty())
+    global.user_agent = argGlobalUA;
+
+  // Temporary fetch_timeout override
+  if (!argFetchTimeout.empty())
+    global.fetch_timeout = stol(argFetchTimeout);
+
+  // jshir700: UA priority chain when proxys-provider=false
+  std::string resolved_ua;
+  if (argProxysProvider == "false") {
+    std::string argUserAgent = getUrlArg(argument, "ua");
+    if (!argProxysUA.empty())
+      argUserAgent = argProxysUA;
+    else if (argUserAgent.empty() && !global.user_agent.empty())
+      argUserAgent = global.user_agent;
+    if (argUserAgent.empty())
+      argUserAgent = "clash.meta";
+    resolved_ua = argUserAgent;
+  } else {
+    if (!global.user_agent.empty())
+      resolved_ua = global.user_agent;
+  }
+
   parsed.explain.upload_requested = parsed.upload.get(false);
   if (parsed.explain_mode && parsed.upload) {
     parsed.upload = false;

@@ -1,6 +1,7 @@
 #include <string>
 #include <algorithm>
 #include <map>
+#include <unordered_set>
 #include <sstream>
 #include <filesystem>
 #include <inja.hpp>
@@ -435,7 +436,7 @@ std::string findFileName(const std::string &path)
     return path.substr(pos + 1, pos2 - pos - 1);
 }
 
-int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules, bool clash_classical_ruleset, RuleConversionStats *stats)
+int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, const std::string &remote_path_prefix, bool script, bool overwrite_original_rules, bool clash_classical_ruleset, RuleConversionStats *stats, bool dedup)
 {
     RuleConversionStats local_stats;
     nlohmann::json data;
@@ -448,6 +449,7 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
     std::map<std::string, int> ruleset_interval, rule_type;
     string_array rules;
     int index = 0;
+    std::unordered_set<std::string> dedupKeys;
 
     if(!overwrite_original_rules && base_rule["rules"].IsDefined())
         rules = safe_as<string_array>(base_rule["rules"]);
@@ -476,6 +478,11 @@ int renderClashScript(YAML::Node &base_rule, std::vector<RulesetContent> &rulese
             }
             if(startsWith(strLine, "FINAL"))
                 strLine = "MATCH";
+            if(dedup) {
+                std::string key = getRuleKey(strLine);
+                if(!dedupKeys.emplace(key).second)
+                    continue;
+            }
             strLine = appendClashRuleTarget(strLine, rule_group);
             rules.emplace_back(std::move(strLine));
             local_stats.add();

@@ -62,8 +62,10 @@ std::string convertRuleset(const std::string &content, int type);
 size_t rulesetConversionCacheMaxEntries();
 size_t rulesetConversionCacheMaxBytes();
 std::string appendClashRuleTarget(const std::string &rule, const std::string &target, bool no_resolve_only = false);
-void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats = nullptr);
-std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats = nullptr);
+/// Extract dedup key from a rule line (type + value, excluding target)
+std::string getRuleKey(const std::string &rule);
+void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats = nullptr, bool dedup = true);
+std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats = nullptr, bool dedup = true);
 bool rulesetToStash(YAML::Node &base_rule,
                     const std::vector<RulesetContent> &ruleset_content_array,
                     bool overwrite_original_rules,

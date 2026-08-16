@@ -150,6 +150,43 @@ static bool isClashCommaPayloadRule(const std::string &rule_type)
            rule_type == "PROCESS-NAME-REGEX" || rule_type == "PROCESS-PATH-REGEX";
 }
 
+/// Extract dedup key from a rule line (type + value, excluding target)
+std::string getRuleKey(const std::string &rule) {
+    string_size pos = rule.find(',');
+    if (pos == std::string::npos)
+        return rule;
+    string_size pos2 = rule.find(',', pos + 1);
+    if (pos2 == std::string::npos)
+        return rule;
+
+    // Use string_view to avoid heap allocations from substr()
+    std::string_view typeView(rule.data(), pos);
+    std::string_view valueView(rule.data() + pos + 1, pos2 - pos - 1);
+
+    // IP-CIDR/IP-CIDR6/GEOIP/SRC-IP-CIDR: include no-resolve flag in dedup key
+    if (typeView == "IP-CIDR" || typeView == "IP-CIDR6" ||
+        typeView == "GEOIP" || typeView == "SRC-IP-CIDR") {
+        std::string result;
+        result.reserve(typeView.size() + 1 + valueView.size() + 10);
+        result.append(typeView.data(), typeView.size());
+        result += ',';
+        result.append(valueView.data(), valueView.size());
+        if (rule.find(",no-resolve") != std::string::npos)
+            result.append(",no-resolve", 11);
+        return result;
+    }
+
+    // AND/OR/NOT/SUB-RULE: everything except the last field (group/policy)
+    if (typeView == "AND" || typeView == "OR" ||
+        typeView == "NOT" || typeView == "SUB-RULE") {
+        string_size last_comma = rule.rfind(',');
+        if (last_comma != std::string::npos && last_comma > pos2)
+            return rule.substr(0, last_comma);
+    }
+
+    return rule.substr(0, pos2);
+}
+
 std::string appendClashRuleTarget(const std::string &rule, const std::string &target, bool no_resolve_only)
 {
     std::string strLine = trimWhitespace(rule, true, true);
@@ -591,7 +628,7 @@ bool rulesetToStash(YAML::Node &base_rule,
     return true;
 }
 
-void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats)
+void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats, bool dedup)
 {
     RuleConversionStats local_stats;
     string_array allRules;
@@ -601,6 +638,7 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_
     const size_t max_allowed_rules = effectiveSettings().maxAllowedRules;
     YAML::Node rules;
     size_t total_rules = 0;
+    std::unordered_set<std::string> dedupKeys;
 
     if(!overwrite_original_rules && base_rule[field_name].IsDefined())
         rules = base_rule[field_name];
@@ -620,9 +658,11 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_
         {
             strLine = retrieved_rules.substr(2);
             strLine = appendClashRuleTarget(strLine, rule_group);
-            allRules.emplace_back(strLine);
-            total_rules++;
-            local_stats.add();
+            if(!dedup || dedupKeys.emplace(strLine).second) {
+                allRules.emplace_back(strLine);
+                total_rules++;
+                local_stats.add();
+            }
             continue;
         }
         retrieved_rules = convertRuleset(retrieved_rules, x.rule_type);
@@ -649,9 +689,11 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_
             strLine = appendClashRuleTarget(strLine, rule_group);
             strLine =
                 appendClashIpCidrNoResolve(strLine, x.rule_type, x.options);
-            allRules.emplace_back(strLine);
-            total_rules++;
-            local_stats.add();
+            if(!dedup || dedupKeys.emplace(strLine).second) {
+                allRules.emplace_back(strLine);
+                total_rules++;
+                local_stats.add();
+            }
         }
     }
 
@@ -665,7 +707,7 @@ void rulesetToClash(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_
         stats->add(local_stats.rules);
 }
 
-std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats)
+std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent> &ruleset_content_array, bool overwrite_original_rules, bool new_field_name, RuleConversionStats *stats, bool dedup)
 {
     RuleConversionStats local_stats;
     std::string rule_group, retrieved_rules, strLine;
@@ -674,6 +716,7 @@ std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent>
     const size_t max_allowed_rules = effectiveSettings().maxAllowedRules;
     std::string output_content = "\n" + field_name + ":\n";
     size_t total_rules = 0;
+    std::unordered_set<std::string> dedupKeys;
 
     if(!overwrite_original_rules && base_rule[field_name].IsDefined())
     {
@@ -697,9 +740,11 @@ std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent>
         {
             strLine = retrieved_rules.substr(2);
             strLine = appendClashRuleTarget(strLine, rule_group);
-            output_content += "  - " + strLine + "\n";
-            total_rules++;
-            local_stats.add();
+            if(!dedup || dedupKeys.emplace(strLine).second) {
+                output_content += "  - " + strLine + "\n";
+                total_rules++;
+                local_stats.add();
+            }
             continue;
         }
         retrieved_rules = convertRuleset(retrieved_rules, x.rule_type);
@@ -727,7 +772,11 @@ std::string rulesetToClashStr(YAML::Node &base_rule, std::vector<RulesetContent>
             strLine = appendClashRuleTarget(strLine, rule_group);
             strLine =
                 appendClashIpCidrNoResolve(strLine, x.rule_type, x.options);
-            output_content += "  - " + strLine + "\n";
+            if(!dedup || dedupKeys.emplace(strLine).second) {
+                output_content += "  - " + strLine + "\n";
+                total_rules++;
+                local_stats.add();
+            }
             total_rules++;
             local_stats.add();
         }
