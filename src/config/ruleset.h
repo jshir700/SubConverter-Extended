@@ -36,6 +36,8 @@ struct RulesetConfig
     String Url;
     Integer Interval = 86400;
     RulesetOptions Options;
+    // jshir700: per-rule User-Agent
+    String UserAgent;
     bool operator==(const RulesetConfig &r) const
     {
         return Group == r.Group && Url == r.Url && Interval == r.Interval &&

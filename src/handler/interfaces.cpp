@@ -3076,6 +3076,25 @@ static SubStageResponse processSubscriptionNodes(
   ProxyPolicy &proxy = policy.subscription_proxy;
   extra_settings &ext = policy.generator;
 
+  // jshir700: global parameters (re-read from request for per-URL handling)
+  std::string argProxysProvider = getUrlArg(request.argument, "proxys-provider");
+  std::string argProxysInterval = getUrlArg(request.argument, "proxys-interval");
+  std::string resolved_ua;
+  if (argProxysProvider == "false") {
+    std::string argUserAgent = getUrlArg(request.argument, "ua");
+    std::string argProxysUA = getUrlArg(request.argument, "proxys-ua");
+    if (!argProxysUA.empty())
+      argUserAgent = argProxysUA;
+    else if (argUserAgent.empty() && !global.user_agent.empty())
+      argUserAgent = global.user_agent;
+    if (argUserAgent.empty())
+      argUserAgent = "clash.meta";
+    resolved_ua = argUserAgent;
+  } else {
+    if (!global.user_agent.empty())
+      resolved_ua = global.user_agent;
+  }
+
   RegexMatchConfigs stream_temp = settings.streamNodeRules,
                     time_temp = settings.timeNodeRules;
   string_array urls;
@@ -3478,21 +3497,27 @@ static SubStageResponse processSubscriptionNodes(
 
         if (!url_provider_mode) {
           // Server-side fetch mode: apply per-URL UA/proxy to parse_set
-          auto orig_ua = parse_set.custom_user_agent;
-          auto orig_proxy = parse_set.proxy;
-          std::string effective_ua, effective_proxy;
+          string_icase_map orig_headers = parse_set.request_header ? *parse_set.request_header : string_icase_map{};
+          ProxyPolicy orig_proxy_policy = parse_set.proxy ? parse_set.proxy->resolved() : ProxyPolicy::direct();
+          std::string effective_ua;
+          string_icase_map effective_headers;
 
           if (!item.per_url_ua.empty()) {
             effective_ua = item.per_url_ua;
-            parse_set.custom_user_agent = &effective_ua;
+            effective_headers["User-Agent"] = effective_ua;
           } else if (!resolved_ua.empty()) {
             effective_ua = resolved_ua;
-            parse_set.custom_user_agent = &effective_ua;
+            effective_headers["User-Agent"] = effective_ua;
           }
+
+          // Apply per-URL proxy if specified
           if (!item.per_url_proxy.empty()) {
-            effective_proxy = item.per_url_proxy;
-            parse_set.proxy = &effective_proxy;
+            ProxyPolicy per_url_proxy = parseProxy(item.per_url_proxy, settings.proxyBypass);
+            parse_set.proxy = &per_url_proxy;
           }
+
+          // Apply per-URL UA via headers
+          parse_set.request_header = effective_headers.empty() ? nullptr : &effective_headers;
 
           std::string node_link = item.url;
           if (!item.tag.empty())
@@ -3504,8 +3529,9 @@ static SubStageResponse processSubscriptionNodes(
           }
           groupID++;
 
-          parse_set.custom_user_agent = orig_ua;
-          parse_set.proxy = orig_proxy;
+          // Restore original headers and proxy
+          parse_set.request_header = orig_headers.empty() ? nullptr : &orig_headers;
+          parse_set.proxy = &orig_proxy_policy;
           continue;
         }
 
