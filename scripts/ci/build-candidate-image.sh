@@ -30,8 +30,7 @@ if [ "$EVENT_NAME" != "pull_request" ] && [ "$BUILD_MODE" != "master" ]; then
     candidate="ci-${BUILD_VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${CI_ARCH}"
   fi
   tags=(
-    --tag "aethersailor/subconverter-extended:${candidate}"
-    --tag "ghcr.io/aethersailor/subconverter-extended:${candidate}"
+    --tag "jshir700/subconverter-extended:${candidate}"
   )
   output=(--push)
   provenance=(--provenance=false)

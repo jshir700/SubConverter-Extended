@@ -23,7 +23,7 @@ int main() {
       {"https://github.com/Aethersailor/Custom_OpenClash_Rules/raw/main/"
        "game_rule/a.mrs",
        "https://git.asailor.org/Custom_OpenClash_Rules/main/game_rule/a.mrs"},
-      {"https://github.com/aethersailor/custom_openclash_rules/blob/refs/"
+      {"https://github.com/jshir700/custom_openclash_rules/blob/refs/"
        "heads/main/overwrite/a.yaml",
        "https://git.asailor.org/Custom_OpenClash_Rules/main/overwrite/a.yaml"},
       {"https://cdn.jsdelivr.net/gh/Aethersailor/"

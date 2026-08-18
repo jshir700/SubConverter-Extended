@@ -323,7 +323,7 @@ def detach_reachable_transient_tags(
 
     for tag in detach:
         before, _manifest = client.manifest(tag)
-        annotation = f"index:io.github.aethersailor.registry-cleanup={time.time_ns()}"
+        annotation = f"index:io.github.jshir700.registry-cleanup={time.time_ns()}"
         command = [
             "docker",
             "buildx",
@@ -377,7 +377,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--github-owner", default="Aethersailor")
     parser.add_argument("--repository", default="subconverter-extended")
-    parser.add_argument("--dockerhub-namespace", default="aethersailor")
+    parser.add_argument("--dockerhub-namespace", default="jshir700")
     parser.add_argument("--current-tag", action="append", default=[])
     parser.add_argument("--current-prefix", action="append", default=[])
     parser.add_argument("--prune-all", action="store_true")

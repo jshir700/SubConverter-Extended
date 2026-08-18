@@ -71,7 +71,7 @@ deny_trace() {
 bash "$REPOSITORY/scripts/ci/build-candidate-image.sh" \
   amd64 ./Dockerfile linux/amd64 subconverter-alpine push dev dev
 assert_trace "--push"
-assert_trace "aethersailor/subconverter-extended:ci-dev-amd64"
+assert_trace "jshir700/subconverter-extended:ci-dev-amd64"
 assert_trace "--provenance=false"
 deny_trace "buildcache-"
 assert_trace "--build-arg THREADS=16"

@@ -14,7 +14,7 @@ import urllib.request
 # ============================================================
 # Configuration
 # ============================================================
-HOST_IP = "192.168.31.238"  # change to your LAN IP
+HOST_IP = "192.168.x.x"  # TODO: replace with your LAN IP
 FAKE_PORT = 18083
 SUBC_PORT = 25502
 IMAGE_NAME = "subconverter-extended:test-dedup"

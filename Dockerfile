@@ -342,7 +342,7 @@ LABEL \
   org.opencontainers.image.version="${VERSION}" \
   org.opencontainers.image.revision="${SHA}" \
   org.opencontainers.image.created="${BUILD_DATE}" \
-  com.aethersailor.dependency-snapshot.sha256="${DEPENDENCY_SNAPSHOT_SHA}" \
+  com.jshir700.dependency-snapshot.sha256="${DEPENDENCY_SNAPSHOT_SHA}" \
   maintainer="Aethersailor"
 
 ENV TZ=Asia/Shanghai
@@ -352,6 +352,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
 
 COPY --from=builder --chmod=0755 /src/subconverter /usr/bin/subconverter
 COPY --from=builder /src/base /base/
+COPY --from=builder /src/resources /resources/
 COPY --from=builder /runtime-libs/ /
 
 ENV LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/lib/aarch64-linux-gnu:/usr/lib/aarch64-linux-gnu:/lib64:/usr/lib"

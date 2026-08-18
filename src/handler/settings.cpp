@@ -1473,7 +1473,6 @@ bool readConf() {
     eraseElements(global.includeRemarks);
     eraseElements(global.customProxyGroups);
     eraseElements(global.customRulesets);
-    global.statisticsEnabled = false;
     global.statisticsDataDir = "stats";
     global.statisticsFlushInterval = 5;
     global.statisticsGeoProvider = "header";

@@ -39,15 +39,13 @@ class BuildPlanTests(unittest.TestCase):
         self.assertEqual(
             BUILD_PLAN.image_tags("dev", "ignored"),
             [
-                "aethersailor/subconverter-extended:dev",
-                "ghcr.io/aethersailor/subconverter-extended:dev",
+                "jshir700/subconverter-extended:dev",
             ],
         )
         self.assertEqual(
             BUILD_PLAN.image_tags("release", "v1.3.1"),
             [
-                "aethersailor/subconverter-extended:v1.3.1",
-                "ghcr.io/aethersailor/subconverter-extended:v1.3.1",
+                "jshir700/subconverter-extended:v1.3.1",
             ],
         )
         self.assertEqual(BUILD_PLAN.image_tags("master", "master-deadbee"), [])

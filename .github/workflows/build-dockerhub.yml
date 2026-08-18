@@ -163,12 +163,8 @@ jobs:
 
           assert_registry_tag_absent \
             registry-1.docker.io \
-            aethersailor/subconverter-extended \
-            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:aethersailor/subconverter-extended:pull"
-          assert_registry_tag_absent \
-            ghcr.io \
-            aethersailor/subconverter-extended \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:aethersailor/subconverter-extended:pull"
+            jshir700/subconverter-extended \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:jshir700/subconverter-extended:pull"
 
       - name: Verify COCR runtime assets are absent
         shell: bash
@@ -314,13 +310,6 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
 
-      - name: Log in to GHCR
-        if: github.event_name != 'pull_request' && needs.prepare.outputs.mode != 'master'
-        shell: bash
-        env:
-          GHCR_USERNAME: ${{ github.actor }}
-          GHCR_TOKEN: ${{ github.token }}
-        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
 
       - name: Prepare Docker build args
         id: docker_args
@@ -473,7 +462,7 @@ jobs:
         timeout-minutes: 3
         uses: ./.github/actions/smoke-docker-image
         with:
-          image: ghcr.io/aethersailor/subconverter-extended@${{ steps.build_image.outputs.digest }}
+          image: jshir700/subconverter-extended@${{ steps.build_image.outputs.digest }}
           platform: ${{ matrix.image_platform }}
           expected-version: ${{ needs.prepare.outputs.version }}
           expected-revision: ${{ needs.prepare.outputs.sha }}
@@ -651,13 +640,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Download image digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -702,12 +684,8 @@ jobs:
           }
           assert_absent \
             registry-1.docker.io \
-            aethersailor/subconverter-extended \
-            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:aethersailor/subconverter-extended:pull"
-          assert_absent \
-            ghcr.io \
-            aethersailor/subconverter-extended \
-            "https://ghcr.io/token?service=ghcr.io&scope=repository:aethersailor/subconverter-extended:pull"
+            jshir700/subconverter-extended \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:jshir700/subconverter-extended:pull"
 
       - name: Promote tested candidates
         shell: bash
@@ -726,8 +704,7 @@ jobs:
 
           TAGS="${{ needs.prepare.outputs.tags }}"
           IMAGE_NAMES=(
-            "aethersailor/subconverter-extended"
-            "ghcr.io/aethersailor/subconverter-extended"
+            "jshir700/subconverter-extended"
           )
 
           for IMAGE_NAME in "${IMAGE_NAMES[@]}"; do
@@ -780,10 +757,10 @@ jobs:
               echo "::error::Could not resolve the manifest digest for $TAG."
               exit 1
             fi
-            if [[ "$TAG" == ghcr.io/* ]]; then
-              GHCR_DIGEST="$digest"
-              echo "ghcr_digest=$digest" >> "$GITHUB_OUTPUT"
-            else
+            if [[ "$TAG" != dockerhub/* ]]; then
+              DOCKERHUB_DIGEST="$digest"
+              echo "dockerhub_digest=$digest" >> "$GITHUB_OUTPUT"
+            fi
               DOCKERHUB_DIGEST="$digest"
               echo "dockerhub_digest=$digest" >> "$GITHUB_OUTPUT"
             fi
@@ -801,7 +778,6 @@ jobs:
             done
           done
           test -n "$DOCKERHUB_DIGEST"
-          test -n "$GHCR_DIGEST"
           if [ "$DOCKERHUB_DIGEST" != "$GHCR_DIGEST" ]; then
             echo "::error::Docker Hub and GHCR manifest digests differ."
             exit 1
@@ -985,8 +961,7 @@ jobs:
           ## Docker Images
 
           Docker images are published to:
-          - `aethersailor/subconverter-extended`
-          - `ghcr.io/aethersailor/subconverter-extended`
+          - `jshir700/subconverter-extended`
 
           Supported Docker platforms:
           - `linux/amd64`
@@ -1136,13 +1111,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Log in to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
       - name: Re-verify published version digests
         id: version_images
         shell: bash
@@ -1151,14 +1119,11 @@ jobs:
           inspect_digest() {
             docker buildx imagetools inspect "$1" | awk '$1 == "Digest:" && digest == "" {digest = $2} END {if (digest == "") exit 1; print digest}'
           }
-          test "$(inspect_digest "aethersailor/subconverter-extended:${{ needs.prepare.outputs.version }}")" = "${{ needs.merge-manifest.outputs.dockerhub_digest }}"
-          test "$(inspect_digest "ghcr.io/aethersailor/subconverter-extended:${{ needs.prepare.outputs.version }}")" = "${{ needs.merge-manifest.outputs.ghcr_digest }}"
-          dockerhub_latest="$(inspect_digest aethersailor/subconverter-extended:latest)"
-          ghcr_latest="$(inspect_digest ghcr.io/aethersailor/subconverter-extended:latest)"
+          test "$(inspect_digest "jshir700/subconverter-extended:${{ needs.prepare.outputs.version }}")" = "${{ needs.merge-manifest.outputs.dockerhub_digest }}"
+          dockerhub_latest="$(inspect_digest jshir700/subconverter-extended:latest)"
           [[ "$dockerhub_latest" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$ghcr_latest" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "dockerhub_latest=$dockerhub_latest" >> "$GITHUB_OUTPUT"
-          echo "ghcr_latest=$ghcr_latest" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         shell: bash
@@ -1183,34 +1148,23 @@ jobs:
           }
           OLD_DOCKERHUB="${{ steps.version_images.outputs.dockerhub_latest }}"
           OLD_GHCR="${{ steps.version_images.outputs.ghcr_latest }}"
-          test "$(inspect_digest aethersailor/subconverter-extended:latest)" = "$OLD_DOCKERHUB"
-          test "$(inspect_digest ghcr.io/aethersailor/subconverter-extended:latest)" = "$OLD_GHCR"
+          test "$(inspect_digest jshir700/subconverter-extended:latest)" = "$OLD_DOCKERHUB"
 
           rollback_latest() {
             echo "::warning::Restoring the pre-release latest pointers after a promotion failure."
             docker buildx imagetools create \
-              -t aethersailor/subconverter-extended:latest \
-              "aethersailor/subconverter-extended@$OLD_DOCKERHUB" || true
-            docker buildx imagetools create \
-              -t ghcr.io/aethersailor/subconverter-extended:latest \
-              "ghcr.io/aethersailor/subconverter-extended@$OLD_GHCR" || true
+              -t jshir700/subconverter-extended:latest \
+              "jshir700/subconverter-extended@$OLD_DOCKERHUB" || true
           }
 
           if ! docker buildx imagetools create \
-            -t aethersailor/subconverter-extended:latest \
-            "aethersailor/subconverter-extended:$VERSION"; then
-            rollback_latest
-            exit 1
-          fi
-          if ! docker buildx imagetools create \
-            -t ghcr.io/aethersailor/subconverter-extended:latest \
-            "ghcr.io/aethersailor/subconverter-extended:$VERSION"; then
+            -t jshir700/subconverter-extended:latest \
+            "jshir700/subconverter-extended:$VERSION"; then
             rollback_latest
             exit 1
           fi
 
-          if [ "$(inspect_digest aethersailor/subconverter-extended:latest)" != "${{ needs.merge-manifest.outputs.dockerhub_digest }}" ] || \
-             [ "$(inspect_digest ghcr.io/aethersailor/subconverter-extended:latest)" != "${{ needs.merge-manifest.outputs.ghcr_digest }}" ]; then
+          if [ "$(inspect_digest jshir700/subconverter-extended:latest)" != "${{ needs.merge-manifest.outputs.dockerhub_digest }}" ]; then
             rollback_latest
             echo "::error::latest digest verification failed."
             exit 1
@@ -1278,9 +1232,9 @@ jobs:
       - name: Log in to GHCR
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          registry: registry-1.docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Remove this run's temporary container data
         id: cleanup

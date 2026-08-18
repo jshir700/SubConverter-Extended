@@ -60,7 +60,7 @@ runs:
           test "$(date +%z)" = "+0800"
           test ! -e /base/Custom_OpenClash_Rules
         '
-        if [ "$(docker inspect --format '{{ if index .Config.Labels "com.aethersailor.custom-openclash-rules.revision" }}present{{ end }}' "$CID")" = "present" ]; then
+        if [ "$(docker inspect --format '{{ if index .Config.Labels "com.jshir700.custom-openclash-rules.revision" }}present{{ end }}' "$CID")" = "present" ]; then
           echo "Image still contains the removed Custom_OpenClash_Rules revision label." >&2
           exit 1
         fi

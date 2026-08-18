@@ -117,13 +117,8 @@ def create_manifest(
         "assets": assets,
         "images": {
             "dockerhub": {
-                "reference": f"aethersailor/subconverter-extended:{version}",
+                "reference": f"jshir700/subconverter-extended:{version}",
                 "digest": dockerhub_digest,
-                "revision": revision,
-            },
-            "ghcr": {
-                "reference": f"ghcr.io/aethersailor/subconverter-extended:{version}",
-                "digest": ghcr_digest,
                 "revision": revision,
             },
         },

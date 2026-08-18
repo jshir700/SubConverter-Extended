@@ -101,7 +101,7 @@ int main() {
 
   Proxy marker_text = numeric_sid;
   marker_text.Remark =
-      "!<tag:aethersailor.github.io,2026:canonical-string>";
+      "!<tag:jshir700.github.io,2026:canonical-string>";
   YAML::Node marker_text_result =
       buildCanonicalClashProxy(marker_text, overlay);
   marker_text_result.SetStyle(YAML::EmitterStyle::Flow);
@@ -111,7 +111,7 @@ int main() {
   assert(marker_text_dumped.find("short-id: \"00112233\"") !=
          std::string::npos);
   const std::string marker_only =
-      "name: \"!<tag:aethersailor.github.io,2026:canonical-string>\"\n";
+      "name: \"!<tag:jshir700.github.io,2026:canonical-string>\"\n";
   assert(finalizeCanonicalClashYaml(marker_only) == marker_only);
 
   YAML::Node local_tagged = YAML::Load("custom: !fixture value\n");

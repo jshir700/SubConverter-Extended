@@ -3,7 +3,7 @@
 services:
   subconverter-extended:
     container_name: SubConverter-Extended
-    image: aethersailor/subconverter-extended:latest
+    image: jshir700/subconverter-extended:latest
     ports:
       # 保留既有的全接口端口发布，方便局域网设备直接访问；这表示“可能被外部访问”，
       # 但不能单凭该行判断服务已暴露公网，还需结合宿主防火墙、云安全组、NAT 和反代判断。

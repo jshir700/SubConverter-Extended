@@ -11,7 +11,7 @@
 
 [![GitHub Tag](https://img.shields.io/github/v/tag/Aethersailor/SubConverter-Extended?style=flat&logo=github&label=version&color=blue)](https://github.com/Aethersailor/SubConverter-Extended/releases/latest)
 [![Release](https://img.shields.io/github/actions/workflow/status/Aethersailor/SubConverter-Extended/release.yml?style=flat&label=release&logo=githubactions)](https://github.com/Aethersailor/SubConverter-Extended/actions/workflows/release.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/aethersailor/subconverter-extended?style=flat&logo=docker)](https://hub.docker.com/r/aethersailor/subconverter-extended)
+[![Docker Pulls](https://img.shields.io/docker/pulls/jshir700/subconverter-extended?style=flat&logo=docker)](https://hub.docker.com/r/jshir700/subconverter-extended)
 [![License](https://img.shields.io/badge/license-GPL--3.0-orange?style=flat)](LICENSE)
 [![Wiki](https://img.shields.io/badge/Wiki-完整用户手册-2f81f7?style=flat&logo=github)](https://github.com/Aethersailor/SubConverter-Extended/wiki)
 
@@ -176,7 +176,7 @@ docker run -d \
   --name SubConverter-Extended \
   -p 25500:25500 \
   --restart unless-stopped \
-  aethersailor/subconverter-extended:latest
+  jshir700/subconverter-extended:latest
 ```
 
 检查服务：

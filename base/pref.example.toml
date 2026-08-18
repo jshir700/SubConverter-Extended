@@ -256,7 +256,7 @@ allow_public_upload = false
 [statistics]
 # 是否启用隐私友好的运行统计以及 /dashboard、/dashboard/data；关闭时不启用统计请求处理。
 # Whether to enable privacy-preserving runtime statistics plus /dashboard and /dashboard/data; false keeps statistics request handling disabled.
-enabled = false
+enabled = true
 # 统计持久化目录；容器部署如需重启后保留数据，应把此目录挂载到持久卷。
 # Statistics persistence directory; mount it on a persistent volume in containers if data must survive restarts.
 data_dir = "stats"
@@ -348,7 +348,7 @@ import = "snippets/groups.toml"
 [ruleset]
 # 是否启用规则集下载与规则生成；关闭时不应依赖下方覆盖或按请求更新选项。
 # Whether to enable ruleset retrieval and rule generation; when disabled, do not rely on the overwrite or per-request refresh options below.
-enabled = true
+enabled = false
 
 # 是否用生成的规则覆盖基础模板已有规则；false 保留原规则并追加生成结果。
 # Whether generated rules replace rules already present in the base template; false preserves the originals and appends generated output.

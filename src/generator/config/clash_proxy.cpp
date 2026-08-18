@@ -18,7 +18,7 @@
 namespace {
 
 constexpr const char *kQuotedCanonicalStringTag =
-    "tag:aethersailor.github.io,2026:canonical-string";
+    "tag:jshir700.github.io,2026:canonical-string";
 
 bool isDigit(char value) { return value >= '0' && value <= '9'; }
 
