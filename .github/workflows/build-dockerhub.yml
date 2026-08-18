@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - dev
+    tags:
+      - 'v*.*.*'
     paths-ignore:
       - 'README.md'
       - 'README-*.md'
@@ -13,6 +15,16 @@ on:
       - master
       - dev
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to rebuild, e.g. v1.2.3"
+        required: false
+        type: string
+      overwrite_existing_release:
+        description: "Overwrite assets/body of an existing GitHub Release"
+        required: false
+        default: false
+        type: boolean
   workflow_call:
 permissions:
   contents: read
