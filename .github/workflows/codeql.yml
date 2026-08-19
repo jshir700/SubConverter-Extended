@@ -56,14 +56,14 @@ jobs:
               );
             }
 
-  # ✅ 新增：检测代码变更（workflow_dispatch 时跳过）
+  # ✅ 检测代码变更（workflow_call 时跳过）
   check-changes:
     name: Check Code Changes
     runs-on: ubuntu-latest
     outputs:
       has_code_changes: ${{ steps.changes.outputs.code }}
-    # ✅ workflow_call 或 workflow_dispatch 时跳过变更检测
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    # ✅ 所有事件都运行检查，workflow_call 由调用方控制
+    if: github.event_name != 'workflow_call'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
