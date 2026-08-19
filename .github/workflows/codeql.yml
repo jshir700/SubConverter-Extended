@@ -283,16 +283,13 @@ jobs:
       with:
         category: "/language:${{matrix.language}}"
 
-# ✅ CodeQL 分析成功后触发 Docker 构建（workflow_dispatch 时也触发）
+  # ✅ CodeQL 分析成功后触发 Docker 构建（workflow_dispatch 时也触发）
   trigger-build:
     name: Trigger Docker Build
-    runs-on: ubuntu-latest
     needs: [analyze]
     if: >-
       needs.analyze.result == 'success'
       && (github.event_name == 'push'
           || github.event_name == 'pull_request'
           || github.event_name == 'workflow_dispatch')
-    steps:
-      - name: Call build workflow
-        uses: ./.github/workflows/build-dockerhub.yml
+    uses: ./.github/workflows/build-dockerhub.yml
