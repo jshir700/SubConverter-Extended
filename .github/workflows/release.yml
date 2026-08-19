@@ -5,7 +5,6 @@ on:
     tags:
       - 'v*.*.*'
 
-# Formal versions are serialized so one release finishes before the next starts.
 concurrency:
   group: formal-release
   cancel-in-progress: false
@@ -15,7 +14,18 @@ permissions:
   packages: write
 
 jobs:
-  release:
-    name: Tag release
+  # ✅ 先运行 codeql（自动跳过变更检测，因为 tag 触发）
+  codeql:
+    name: CodeQL Check
+    uses: ./.github/workflows/codeql.yml
+    secrets: inherit
+
+  # ✅ codeql 成功或跳过后才构建
+  build:
+    name: Build and Push Docker image
+    needs: [codeql]
+    if: >-
+      needs.codeql.result == 'success'
+      || needs.codeql.result == 'skipped'
     uses: ./.github/workflows/build-dockerhub.yml
     secrets: inherit

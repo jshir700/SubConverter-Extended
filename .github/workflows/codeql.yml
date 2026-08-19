@@ -3,7 +3,7 @@ name: "CodeQL"
 on:
   workflow_dispatch:
   push:
-    branches: [ "dev" ]
+    branches: [ "dev", "master" ]  # ✅ 新增 master
   pull_request:
     branches: [ "dev", "master" ]
 
@@ -20,7 +20,7 @@ jobs:
     steps:
       - name: Skip stale branch events
         id: verify
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d895573f7108da1b3 # v9
         with:
           script: |
             const isBranch = context.ref.startsWith('refs/heads/');
@@ -52,11 +52,48 @@ jobs:
               );
             }
 
+  # ✅ 新增：检测代码变更（workflow_dispatch 时跳过）
+  check-changes:
+    name: Check Code Changes
+    runs-on: ubuntu-latest
+    outputs:
+      has_code_changes: ${{ steps.changes.outputs.code }}
+    # ✅ workflow_call 或 workflow_dispatch 时跳过变更检测
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for code changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - '.github/**'
+              - 'src/**'
+              - 'bridge/**'
+              - 'scripts/**'
+              - 'include/**'
+              - 'CMakeLists.txt'
+              - 'Dockerfile'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!tests/**'
+
   analyze:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-    needs: source-head
-    if: needs.source-head.outputs.current == 'true' && github.actor != 'dependabot[bot]'
+    needs: [source-head, check-changes]
+    # ✅ workflow_dispatch 或 workflow_call 时无条件运行
+    if: >-
+      needs.source-head.outputs.current == 'true'
+      && (needs.check-changes.outputs.has_code_changes == 'true'
+          || github.event_name == 'workflow_dispatch'
+          || github.event_name == 'workflow_call')
+      && github.actor != 'dependabot[bot]'
     permissions:
       actions: read
       contents: read
@@ -127,21 +164,16 @@ jobs:
       if: matrix.language == 'c-cpp'
       run: |
         cd bridge
-        # Ensure dependencies are downloaded (for script to find mihomo source)
         go mod download
-        # Set GOMODCACHE for the script to find mihomo source
         GOMODCACHE="$(go env GOMODCACHE)"
         export GOMODCACHE
         echo "GOMODCACHE=$GOMODCACHE"
-        # Generate header files
         go run ../scripts/generate_proxy_validation.go -o proxy_validation_generated.go -manifest mihomo_capabilities.json
         go run ../scripts/generate_schemes.go -manifest mihomo_capabilities.json -o mihomo_schemes.h
         go run ../scripts/generate_param_compat.go -manifest mihomo_capabilities.json -o param_compat.h
         cp mihomo_schemes.h ../src/parser/
         cp param_compat.h ../src/parser/
-        # Build static library
         CGO_ENABLED=1 go build -buildmode=c-archive -ldflags="-s -w" -o libmihomo.a .
-        # Install to system paths
         sudo install -m644 libmihomo.a /usr/lib/
         sudo install -m644 libmihomo.h /usr/include/
 
@@ -178,13 +210,11 @@ jobs:
         rm -rf libcron
         git clone https://github.com/PerMalmberg/libcron
         cd libcron
-        git checkout v1.3.0  # Pin version for stability
-        # Force disable tests by modifying CMakeLists.txt (no option provided upstream)
+        git checkout v1.3.0
         sed -i '/add_subdirectory(test)/d' CMakeLists.txt
         sed -i '/add_dependencies(cron_test libcron)/d' CMakeLists.txt
         cmake -DCMAKE_BUILD_TYPE=Release .
         make -j"$(nproc)"
-        # Manual install (make install fails due to missing target)
         sudo install -d /usr/local/include/libcron
         cron_header="$(find . -type f -name Cron.h -print -quit)"
         if [ -z "$cron_header" ]; then
@@ -200,7 +230,6 @@ jobs:
           find . -maxdepth 5 -type f -name "*.a" -print
           exit 1
         fi
-        # Date library is provided by apt package libhowardhinnant-date-dev
         sudo install -m644 "$libcron_lib" /usr/local/lib/
 
     # [SETUP] Restore Artifacts if Cache Hit
@@ -208,8 +237,6 @@ jobs:
       if: matrix.language == 'c-cpp' && steps.cache-cpp-deps.outputs.cache-hit == 'true'
       run: |
         echo "Restoring artifacts from cache..."
-        
-        # Restore QuickJS
         cd quickjspp
         sudo install -d /usr/lib/quickjs/
         sudo install -m644 quickjs/libquickjs.a /usr/lib/quickjs/
@@ -217,8 +244,6 @@ jobs:
         sudo install -m644 quickjs/quickjs.h quickjs/quickjs-libc.h /usr/include/quickjs/
         sudo install -m644 quickjspp.hpp /usr/include/
         cd ..
-
-        # Restore LibCron
         cd libcron
         sudo install -d /usr/local/include/libcron
         cron_header="$(find . -type f -name Cron.h -print -quit)"
@@ -245,7 +270,6 @@ jobs:
         build-mode: ${{ matrix.build-mode }}
         config-file: ./.github/codeql/codeql-config.yml
         queries: security-extended
-        # Disable trap caching to avoid "No such file or directory" error
         trap-caching: false
 
     - name: Build (manual)
@@ -258,3 +282,18 @@ jobs:
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
+
+  # ✅ CodeQL 分析成功后触发 Docker 构建（workflow_dispatch 时也触发）
+  trigger-build:
+    name: Trigger Docker Build
+    runs-on: ubuntu-latest
+    needs: [analyze]
+    if: >-
+      needs.analyze.result == 'success'
+      && (github.event_name == 'push'
+          || github.event_name == 'pull_request'
+          || github.event_name == 'workflow_dispatch')
+    jobs:
+      build:
+        uses: ./.github/workflows/build-dockerhub.yml
+        secrets: inherit
