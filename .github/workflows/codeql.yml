@@ -297,3 +297,4 @@ jobs:
           || github.event_name == 'pull_request'
           || github.event_name == 'workflow_dispatch')
     uses: ./.github/workflows/build-dockerhub.yml
+    secrets: inherit
