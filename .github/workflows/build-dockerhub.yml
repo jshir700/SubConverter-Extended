@@ -312,7 +312,7 @@ jobs:
           docker buildx inspect --bootstrap
 
       - name: Log in to Docker Hub
-        if: github.event_name != 'pull_request' && needs.prepare.outputs.mode != 'master'
+        if: github.event_name != 'pull_request' && (needs.prepare.outputs.mode == 'dev' || needs.prepare.outputs.mode == 'master' || needs.prepare.outputs.mode == 'release')
         shell: bash
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -452,14 +452,14 @@ jobs:
           exit 1
 
       - name: Save image digest
-        if: github.event_name != 'pull_request' && needs.prepare.outputs.mode != 'master'
+        if: github.event_name != 'pull_request' && (needs.prepare.outputs.mode == 'dev' || needs.prepare.outputs.mode == 'master' || needs.prepare.outputs.mode == 'release')
         shell: bash
         run: |
           mkdir -p docker-digests
           printf '%s\n' "${{ steps.build_image.outputs.digest }}" > "docker-digests/${{ matrix.arch }}.txt"
 
       - name: Upload image digest
-        if: github.event_name != 'pull_request' && needs.prepare.outputs.mode != 'master'
+        if: github.event_name != 'pull_request' && (needs.prepare.outputs.mode == 'dev' || needs.prepare.outputs.mode == 'master' || needs.prepare.outputs.mode == 'release')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: docker-digest-${{ matrix.arch }}
@@ -467,7 +467,7 @@ jobs:
           retention-days: 1
 
       - name: Smoke test image (${{ matrix.arch }})
-        if: github.event_name != 'pull_request' && needs.prepare.outputs.mode != 'master'
+        if: github.event_name != 'pull_request' && (needs.prepare.outputs.mode == 'dev' || needs.prepare.outputs.mode == 'master' || needs.prepare.outputs.mode == 'release')
         timeout-minutes: 3
         uses: ./.github/actions/smoke-docker-image
         with:
@@ -585,10 +585,9 @@ jobs:
     if: >-
       always() &&
       github.event_name != 'pull_request' &&
-      needs.prepare.outputs.mode != 'master' &&
       needs.prepare.result == 'success' &&
       needs.build-linux.result == 'success' &&
-      (needs.validate-source.result == 'success' || needs.prepare.outputs.mode == 'release')
+      (needs.validate-source.result == 'success' || needs.prepare.outputs.mode == 'release' || needs.prepare.outputs.mode == 'master')
     outputs:
       dockerhub_digest: ${{ steps.published.outputs.dockerhub_digest }}
       ghcr_digest: ${{ steps.published.outputs.ghcr_digest }}
@@ -1223,8 +1222,7 @@ jobs:
       github.event_name != 'pull_request' &&
       needs.prepare.result == 'success' &&
       needs.merge-manifest.result == 'success' &&
-      needs.prepare.outputs.mode != 'master' &&
-      (needs.prepare.outputs.mode == 'dev' || needs.verify-release-complete.result == 'success')
+      (needs.prepare.outputs.mode == 'dev' || needs.prepare.outputs.mode == 'master' || needs.verify-release-complete.result == 'success')
     permissions:
       contents: read
       packages: write
