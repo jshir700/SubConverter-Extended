@@ -46,6 +46,9 @@ def resolve_build_metadata(
     if ref.startswith("refs/tags/"):
         mode = "release"
         version = ref.removeprefix("refs/tags/")
+    elif event_name == "pull_request" and ref == "refs/heads/master":
+        mode = "master"
+        version = f"master-{sha_short}"
     elif event_name == "pull_request":
         mode = "pr"
         version = f"pr-{sha_short}"
