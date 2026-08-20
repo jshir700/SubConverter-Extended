@@ -65,7 +65,10 @@ fi
 
 # For local builds (--load), also tag with digest for smoke test
 if [ "${output[*]}" = "--load" ] && [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-  docker tag "subconverter-extended:${CI_ARCH}-ci" "subconverter-extended@${digest}" || true
+  echo "Tagging local image with digest: subconverter-extended@${digest}"
+  docker tag "subconverter-extended:${CI_ARCH}-ci" "subconverter-extended@${digest}"
+  echo "Available images:"
+  docker images | grep subconverter-extended
 fi
 
 echo "digest=$digest" >> "$GITHUB_OUTPUT"
