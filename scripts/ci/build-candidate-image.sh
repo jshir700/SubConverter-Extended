@@ -47,6 +47,13 @@ docker buildx build \
   --metadata-file "$metadata_file" \
   .
 
+# For local builds (--load), also tag with digest for smoke test
+if [ "${output[*]}" = "--load" ]; then
+  if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    docker tag "subconverter-extended:${CI_ARCH}-ci" "subconverter-extended@${digest}" || true
+  fi
+fi
+
 digest="$(python3 - "$metadata_file" <<'PY'
 import json
 import sys
