@@ -47,13 +47,6 @@ docker buildx build \
   --metadata-file "$metadata_file" \
   .
 
-# For local builds (--load), also tag with digest for smoke test
-if [ "${output[*]}" = "--load" ]; then
-  if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    docker tag "subconverter-extended:${CI_ARCH}-ci" "subconverter-extended@${digest}" || true
-  fi
-fi
-
 digest="$(python3 - "$metadata_file" <<'PY'
 import json
 import sys
@@ -69,4 +62,10 @@ if [ "$EVENT_NAME" != "pull_request" ] && \
   echo "::error::Build did not return a valid candidate image digest."
   exit 1
 fi
+
+# For local builds (--load), also tag with digest for smoke test
+if [ "${output[*]}" = "--load" ] && [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  docker tag "subconverter-extended:${CI_ARCH}-ci" "subconverter-extended@${digest}" || true
+fi
+
 echo "digest=$digest" >> "$GITHUB_OUTPUT"
