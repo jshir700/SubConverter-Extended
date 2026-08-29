@@ -78,6 +78,11 @@ func ConvertSubscription(data *C.char) (result *C.char) {
 	// Convert C string to Go string
 	subscription := C.GoString(data)
 
+	// Expand binary Mieru links before preprocessing. A standard protobuf
+	// Base64 payload may contain '+', which QueryUnescape correctly treats as
+	// a space for URLs but must not touch inside mieru:// payloads.
+	subscription = expandMieruStandardSubscription(subscription)
+
 	// Preprocess subscription to fix URL encoding issues (e.g., v2rayN exported links)
 	subscription = preprocessSubscription(subscription)
 

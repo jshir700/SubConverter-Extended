@@ -3,12 +3,12 @@
     "cpp_httplib": {
       "ref": "HEAD",
       "repository": "https://github.com/yhirose/cpp-httplib.git",
-      "revision": "88240172ea6c0bde3c74d6bc02958f825a131975"
+      "revision": "6494edd8c03c55165825ae3078e2f55c595d8cb6"
     },
     "inja": {
       "ref": "HEAD",
       "repository": "https://github.com/pantor/inja.git",
-      "revision": "94289188eaee21b6b553ed4c706a1ecea2a03387"
+      "revision": "f5cce3dcb14a66bf51ff1a3f122110339fb8f0c3"
     },
     "jpcre2": {
       "ref": "HEAD",
@@ -23,7 +23,7 @@
     "mihomo": {
       "ref": "refs/heads/Meta",
       "repository": "https://github.com/MetaCubeX/mihomo.git",
-      "revision": "e26714a181ac0e2fa803453c0a8e9a9ce94e31cb"
+      "revision": "ac017cdd246ce8bd547653d927e7bf77d7ee73d5"
     },
     "nlohmann_json": {
       "ref": "latest-semver-tag",
@@ -60,7 +60,7 @@
       "source": "mirror.gcr.io/library/debian:trixie-slim"
     },
     "golang": {
-      "pinned": "mirror.gcr.io/library/golang@sha256:26326682769ca980f8f1d3b1f52be2dd1c1d25270e3de3fe0c97d6bb65df3556",
+      "pinned": "mirror.gcr.io/library/golang@sha256:65b6f280bf050ec5af12716857e8ea8439d694dbba8f31ceeb7630670071f2bb",
       "source": "mirror.gcr.io/library/golang:latest"
     }
   },
