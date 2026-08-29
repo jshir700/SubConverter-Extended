@@ -3551,7 +3551,7 @@ static SubStageResponse processSubscriptionNodes(
         provider.tag = item.tag;
         provider.url = item.url_decoded ? item.url : urlDecode(item.url);
         provider.interval = static_cast<uint32_t>(
-            item.per_url_interval_explicit && item.per_url_interval > 0
+            item.per_url_interval_explicit
                 ? item.per_url_interval
                 : (!argProxysInterval.empty()
                        ? to_int(argProxysInterval, -1) > 0
