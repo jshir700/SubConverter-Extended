@@ -471,7 +471,7 @@ jobs:
         timeout-minutes: 3
         uses: ./.github/actions/smoke-docker-image
         with:
-          image: ${{ needs.prepare.outputs.mode == 'master' && github.event_name != 'workflow_dispatch' && 'subconverter-extended:amd64-ci' || format('jshir700/subconverter-extended@{0}', steps.build_image.outputs.digest) }}
+          image: ${{ (needs.prepare.outputs.mode == 'master' && github.event_name != 'workflow_dispatch' && matrix.arch == 'amd64') && 'subconverter-extended:amd64-ci' || format('jshir700/subconverter-extended@{0}', steps.build_image.outputs.digest) }}
           platform: ${{ matrix.image_platform }}
           expected-version: ${{ needs.prepare.outputs.version }}
           expected-revision: ${{ needs.prepare.outputs.sha }}
