@@ -3551,13 +3551,15 @@ static SubStageResponse processSubscriptionNodes(
         provider.tag = item.tag;
         provider.url = item.url_decoded ? item.url : urlDecode(item.url);
         provider.interval = static_cast<uint32_t>(
-            item.per_url_interval_explicit
-                ? item.per_url_interval
-                : (!argProxysInterval.empty()
-                       ? to_int(argProxysInterval, -1) > 0
-                             ? to_int(argProxysInterval, 0)
-                             : settings.proxyProviderInterval
-                       : settings.proxyProviderInterval));
+            item.has_interval
+                ? item.interval
+                : (item.per_url_interval_explicit
+                       ? item.per_url_interval
+                       : (!argProxysInterval.empty()
+                                  ? to_int(argProxysInterval, -1) > 0
+                                        ? to_int(argProxysInterval, 0)
+                                        : settings.proxyProviderInterval
+                                  : settings.proxyProviderInterval)));
         provider.proxy_direct =
             item.has_proxy_direct ? item.proxy_direct
                                   : ext.provider_proxy_direct;
